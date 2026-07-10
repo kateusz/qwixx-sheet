@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import {
+  canMarkCell,
   createPlayer,
   isGameOver,
   lockedRowCount,
@@ -18,6 +19,7 @@ import { BottomBar } from "./bottom-bar"
 import { SettingsDialog } from "./settings-dialog"
 import { DiceModal } from "./dice-modal"
 import { EndGameModal } from "./end-game-modal"
+import { LastRollBanner } from "./roll-display"
 import type { DiceRoll } from "./dice-roller"
 
 const STATE_KEY = "qwixx-session-v2"
@@ -111,16 +113,35 @@ export function QwixxGame() {
   function markCell(color: ColorKey, index: number) {
     if (gameOver) return
     const rowLen = ROWS.find((r) => r.key === color)!.numbers.length
-    const locks = willLockRow(player.rows[color], index, rowLen)
-    setPlayer((p) => {
-      const row = p.rows[color]
-      if (row.locked || row.marks.includes(index)) return p
-      return {
-        ...p,
-        rows: { ...p.rows, [color]: { marks: [...row.marks, index], locked: locks || row.locked } },
-      }
-    })
+    const row = player.rows[color]
+
+    if (row.marks.includes(index)) {
+      play(sfx.mark)
+      setPlayer((p) => {
+        const r = p.rows[color]
+        const newMarks = r.marks.filter((i) => i !== index)
+        const lockIdx = rowLen - 1
+        return {
+          ...p,
+          rows: {
+            ...p.rows,
+            [color]: { marks: newMarks, locked: r.locked && newMarks.includes(lockIdx) },
+          },
+        }
+      })
+      return
+    }
+
+    if (row.locked || !canMarkCell(row, index, rowLen)) return
+    const locks = willLockRow(row, index, rowLen)
     play(locks ? sfx.lock : sfx.mark)
+    setPlayer((p) => ({
+      ...p,
+      rows: {
+        ...p.rows,
+        [color]: { marks: [...p.rows[color].marks, index], locked: locks || p.rows[color].locked },
+      },
+    }))
   }
 
   function setPenalties(count: number) {
@@ -166,6 +187,8 @@ export function QwixxGame() {
             </p>
           </div>
         </header>
+
+        {diceHistory[0] && <LastRollBanner roll={diceHistory[0]} />}
 
         {/* Board (horizontally scrollable on small screens to keep touch targets usable) */}
         <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">

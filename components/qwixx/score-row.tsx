@@ -37,15 +37,16 @@ export function ScoreRow({ config, row, disabled, onMark }: ScoreRowProps) {
           const status = cellStatus(row, index, config.numbers.length)
           const isMarked = status === "marked"
           const isAvailable = status === "available" && !disabled
+          const canToggle = !disabled && (isAvailable || isMarked)
           const isSkipped = status === "skipped"
 
           return (
             <motion.button
               key={index}
               type="button"
-              disabled={!isAvailable}
-              onClick={() => isAvailable && onMark(index)}
-              aria-label={`${config.label} ${num}${isMarked ? ", crossed out" : ""}`}
+              disabled={!canToggle}
+              onClick={() => canToggle && onMark(index)}
+              aria-label={`${config.label} ${num}${isMarked ? ", crossed out, tap to remove" : ""}`}
               aria-pressed={isMarked}
               animate={
                 isSkipped
@@ -53,13 +54,13 @@ export function ScoreRow({ config, row, disabled, onMark }: ScoreRowProps) {
                   : { opacity: status === "locked-out" ? 0.45 : 1, rotate: 0 }
               }
               transition={{ duration: 0.35 }}
-              whileHover={isAvailable ? { scale: 1.12 } : undefined}
-              whileTap={isAvailable ? { scale: 0.9 } : undefined}
+              whileHover={canToggle ? { scale: 1.12 } : undefined}
+              whileTap={canToggle ? { scale: 0.9 } : undefined}
               className={cn(
                 "relative flex aspect-square min-w-0 flex-1 items-center justify-center rounded-lg text-[13px] font-extrabold tabular-nums shadow-sm sm:rounded-xl sm:text-base",
                 config.cell,
                 config.ink,
-                isAvailable ? "cursor-pointer" : "cursor-default",
+                canToggle ? "cursor-pointer" : "cursor-default",
               )}
             >
               <span className={cn(isMarked && "opacity-30")}>{num}</span>

@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { X } from "lucide-react"
 import { DiceRoller, type DiceRoll } from "./dice-roller"
+import { RollChip } from "./roll-display"
 
 interface DiceModalProps {
   open: boolean
@@ -56,18 +57,9 @@ export function DiceModal({ open, muted, history, onClose, onRoll, onRollStart }
                   {history.map((roll) => (
                     <div
                       key={roll.ts}
-                      className="flex items-center gap-1 rounded-lg bg-muted/60 px-2 py-1 text-xs font-semibold tabular-nums"
+                      className="rounded-lg bg-muted/60 px-2 py-1 text-xs font-semibold"
                     >
-                      <span className="flex h-5 w-5 items-center justify-center rounded bg-card text-foreground shadow-sm">
-                        {roll.values[0]}
-                      </span>
-                      <span className="flex h-5 w-5 items-center justify-center rounded bg-card text-foreground shadow-sm">
-                        {roll.values[1]}
-                      </span>
-                      <span className="rounded bg-red-500 px-1.5 py-0.5 text-white">{roll.values[2]}</span>
-                      <span className="rounded bg-yellow-400 px-1.5 py-0.5 text-white">{roll.values[3]}</span>
-                      <span className="rounded bg-green-600 px-1.5 py-0.5 text-white">{roll.values[4]}</span>
-                      <span className="rounded bg-blue-600 px-1.5 py-0.5 text-white">{roll.values[5]}</span>
+                      <RollChip roll={roll} />
                     </div>
                   ))}
                 </div>
