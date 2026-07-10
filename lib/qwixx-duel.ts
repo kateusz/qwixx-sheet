@@ -52,6 +52,8 @@ export interface DuelState {
   phase: DuelPhase
   roll: DuelRoll | null
   action1: DuelPlacement | null
+  /** True if the active player placed any token this turn (action 1 or 2). */
+  turnPlaced: boolean
   disabledDice: ColorKey[]
   totalMisthrows: number
   /** Order of misthrow tokens for display. */
@@ -72,6 +74,7 @@ export function createDuelState(p1Name = "Player 1", p2Name = "Player 2"): DuelS
     phase: "roll",
     roll: null,
     action1: null,
+    turnPlaced: false,
     disabledDice: [],
     totalMisthrows: 0,
     misthrowOwners: [],
@@ -177,7 +180,11 @@ export function placementKindAt(
 
   if (existing) {
     if (existing.owner === player && foremost?.index === index) return "stack"
-    if (existing.owner !== player && foremost?.index === index && existing.stack === 1) return "beat"
+    if (existing.owner !== player && foremost?.index === index && existing.stack === 1) {
+      // Far-right square requires 5+ of your tokens in the row, even when beating.
+      if (isLast && countPlayerTokensInRow(row, player) < MIN_MARKS_TO_LOCK) return null
+      return "beat"
+    }
     return null
   }
 
@@ -329,6 +336,7 @@ export function finishTurn(state: DuelState, placedThisTurn: boolean): DuelState
     phase: "roll",
     roll: null,
     action1: null,
+    turnPlaced: false,
   }
 }
 
@@ -354,10 +362,26 @@ export function duelWinner(state: DuelState): DuelPlayerId | "tie" | null {
   return "tie"
 }
 
-// ponytail: minimal self-check — run via `node --experimental-strip-types` if needed
+// ponytail: minimal self-check
 if (typeof process !== "undefined" && process.argv[1]?.endsWith("qwixx-duel.ts")) {
   let s = createDuelState()
   s = { ...s, phase: "action1", roll: { values: [2, 3, 1, 1, 1, 1], whiteSum: 5, ts: 0 } }
   const p = getValidPlacements(s, "p1", 5)
   console.assert(p.some((x) => x.color === "yellow" && x.index === 3), "white 5 -> yellow 5")
+
+  // Beat on far-right requires 5 tokens in row first.
+  s = createDuelState()
+  s.rows.red.tokens[6] = { owner: "p2", stack: 1 } // red 8 foremost
+  s.rows.red.tokens[10] = { owner: "p2", stack: 1 } // red 12
+  console.assert(placementKindAt(s, "p1", "red", 10, 12) === null, "beat 12 without 5 tokens blocked")
+  s.p1.tokensLeft = 10
+  for (let i = 0; i < 5; i++) s.rows.red.tokens[i] = { owner: "p1", stack: 1 }
+  console.assert(placementKindAt(s, "p1", "red", 10, 12) === "beat", "beat 12 with 5 tokens allowed")
+
+  // Last token on far-right ends without lock.
+  s = createDuelState()
+  s.p1.tokensLeft = 1
+  for (let i = 0; i < 5; i++) s.rows.red.tokens[i] = { owner: "p1", stack: 1 }
+  const locked = applyPlacement(s, "p1", "red", 10, 12)
+  console.assert(locked?.phase === "ended" && !locked.rows.red.locked, "last token on 12 skips lock")
 }
