@@ -20,6 +20,7 @@ import { SettingsDialog } from "./settings-dialog"
 import { DiceModal } from "./dice-modal"
 import { EndGameModal } from "./end-game-modal"
 import { LastRollBanner } from "./roll-display"
+import { VersionNav } from "./version-nav"
 import type { DiceRoll } from "./dice-roller"
 
 const STATE_KEY = "qwixx-session-v2"
@@ -186,6 +187,7 @@ export function QwixxGame() {
               {gameOver ? "Game finished" : `${player.name} · ${locks}/2 rows locked · ${player.penalties}/4 penalties`}
             </p>
           </div>
+          <VersionNav active="classic" />
         </header>
 
         {diceHistory[0] && <LastRollBanner roll={diceHistory[0]} />}
