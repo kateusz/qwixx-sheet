@@ -2,16 +2,9 @@
 
 import { motion } from "framer-motion"
 import { Dices, SkipForward } from "lucide-react"
-import { cn } from "@/lib/utils"
-import {
-  rowNumbers,
-  type DuelRoll,
-  type DuelState,
-} from "@/lib/qwixx-duel"
+import { rowNumbers, type DuelRoll, type DuelState } from "@/lib/qwixx-duel"
 import type { ColorKey } from "@/lib/qwixx"
 import { RollChip } from "../roll-display"
-
-const COLOR_DIE_IDX: Record<ColorKey, number> = { red: 2, yellow: 3, green: 4, blue: 5 }
 
 interface DuelTurnPanelProps {
   state: DuelState
@@ -48,12 +41,7 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
       </div>
 
       {phase === "action1" && (
-        <ActionBlock
-          title={`Action 1 — White sum: ${roll.whiteSum}`}
-          hint="Tap a matching cell on the board, or skip to Action 2."
-          disabledColors={state.disabledDice}
-          roll={roll}
-        >
+        <ActionBlock title="Action 1" hint="Optional. Tap a cell, or skip to Action 2.">
           <button
             type="button"
             onClick={onSkipAction1}
@@ -67,10 +55,8 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
 
       {phase === "action2" && (
         <ActionBlock
-          title="Action 2 — White + color die"
-          hint={placedAction1 ? "Must use a different square than Action 1." : "Combine one white die with one color die."}
-          disabledColors={state.disabledDice}
-          roll={roll}
+          title="Action 2"
+          hint={placedAction1 ? "Optional. Must use a different square than Action 1." : "Optional."}
         >
           <button
             type="button"
@@ -85,50 +71,11 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
   )
 }
 
-function ActionBlock({
-  title,
-  hint,
-  children,
-  disabledColors,
-  roll,
-}: {
-  title: string
-  hint: string
-  children: React.ReactNode
-  disabledColors: ColorKey[]
-  roll: DuelRoll
-}) {
-  const colors: ColorKey[] = ["red", "yellow", "green", "blue"]
+function ActionBlock({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
   return (
     <div>
       <p className="text-sm font-black text-foreground">{title}</p>
       <p className="text-xs text-muted-foreground">{hint}</p>
-      <div className="mt-2 flex gap-1">
-        {colors.map((color) => {
-          const off = disabledColors.includes(color)
-          const idx = COLOR_DIE_IDX[color]
-          return (
-            <span
-              key={color}
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-bold text-white",
-                off
-                  ? "bg-muted text-muted-foreground line-through"
-                  : color === "red"
-                    ? "bg-red-500"
-                    : color === "yellow"
-                      ? "bg-yellow-500 text-yellow-950"
-                      : color === "green"
-                        ? "bg-green-600"
-                        : "bg-blue-600",
-              )}
-            >
-              {color[0].toUpperCase()}
-              {roll.values[idx]}
-            </span>
-          )
-        })}
-      </div>
       <div className="mt-2">{children}</div>
     </div>
   )
