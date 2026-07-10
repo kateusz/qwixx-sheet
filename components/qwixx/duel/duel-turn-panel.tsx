@@ -4,10 +4,7 @@ import { motion } from "framer-motion"
 import { Dices, SkipForward } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  getAction2Options,
-  getValidPlacements,
   rowNumbers,
-  type DuelPlacement,
   type DuelRoll,
   type DuelState,
 } from "@/lib/qwixx-duel"
@@ -41,8 +38,6 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
 
   if (!roll) return null
 
-  const action1Placements = getValidPlacements(state, active, roll.whiteSum, undefined, state.action1)
-  const action2Options = getAction2Options(state, active)
   const placedAction1 = !!state.action1
 
   return (
@@ -55,19 +50,14 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
       {phase === "action1" && (
         <ActionBlock
           title={`Action 1 — White sum: ${roll.whiteSum}`}
-          hint="Tap a highlighted cell, or skip to Action 2."
+          hint="Tap a matching cell on the board, or skip to Action 2."
           disabledColors={state.disabledDice}
           roll={roll}
         >
-          {action1Placements.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No valid placements for white sum.</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">{action1Placements.length} placement(s) on the board.</p>
-          )}
           <button
             type="button"
             onClick={onSkipAction1}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-foreground hover:bg-muted"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-foreground hover:bg-muted"
           >
             <SkipForward className="h-3.5 w-3.5" />
             Skip to Action 2
@@ -82,25 +72,10 @@ export function DuelTurnPanel({ state, onRoll, onRollStart, onSkipAction1, onEnd
           disabledColors={state.disabledDice}
           roll={roll}
         >
-          {action2Options.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No valid color combinations.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {action2Options.map((opt) => (
-                <span
-                  key={`${opt.color}-${opt.whiteIndex}-${opt.sum}`}
-                  className="rounded-lg bg-muted px-2 py-1 text-xs font-bold tabular-nums"
-                >
-                  W{roll.values[opt.whiteIndex]}+{opt.color[0].toUpperCase()}
-                  {roll.values[COLOR_DIE_IDX[opt.color]]}={opt.sum}
-                </span>
-              ))}
-            </div>
-          )}
           <button
             type="button"
             onClick={onEndTurn}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"
           >
             End turn{!placedAction1 && " (misthrow if nothing placed)"}
           </button>
@@ -175,14 +150,6 @@ function RollButton({ onRoll, onRollStart }: { onRoll: (roll: DuelRoll) => void;
       Roll
     </motion.button>
   )
-}
-
-export function duelHighlights(state: DuelState): DuelPlacement[] {
-  if (!state.roll || state.phase === "roll" || state.phase === "ended") return []
-  if (state.phase === "action1") {
-    return getValidPlacements(state, state.active, state.roll.whiteSum, undefined, state.action1)
-  }
-  return getAction2Options(state, state.active).flatMap((o) => o.placements)
 }
 
 export function numberAt(_state: DuelState, color: ColorKey, index: number): number {
