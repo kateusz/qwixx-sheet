@@ -60,14 +60,14 @@ export function ChainScoreRow({ config, row, disabled, onMark, cellRef }: ChainS
               whileHover={canToggle ? { scale: 1.12 } : undefined}
               whileTap={canToggle ? { scale: 0.9 } : undefined}
               className={cn(
-                "relative flex aspect-square min-w-0 flex-1 items-center justify-center rounded-lg text-[13px] font-extrabold tabular-nums shadow-sm sm:rounded-xl sm:text-base",
+                "relative z-10 flex aspect-square min-w-0 flex-1 items-center justify-center rounded-lg text-[13px] font-extrabold tabular-nums shadow-sm sm:rounded-xl sm:text-base",
                 config.cell,
                 config.ink,
                 canToggle ? "cursor-pointer" : "cursor-default",
-                isChain && "ring-2 ring-dashed ring-foreground/50",
               )}
             >
-              <span className={cn(isMarked && "opacity-30")}>{num}</span>
+              {isChain && <ChainRing />}
+              <span className={cn("relative z-[1]", isMarked && "opacity-30")}>{num}</span>
               <AnimatePresence>
                 {isMarked && (
                   <motion.span
@@ -75,7 +75,7 @@ export function ChainScoreRow({ config, row, disabled, onMark, cellRef }: ChainS
                     animate={{ scale: [0, 1.25, 1], opacity: 1 }}
                     exit={{ scale: 0, opacity: 0 }}
                     transition={{ duration: 0.3, times: [0, 0.6, 1] }}
-                    className={cn("absolute inset-0 flex items-center justify-center", config.ink)}
+                    className={cn("absolute inset-0 z-[2] flex items-center justify-center", config.ink)}
                   >
                     <XMark />
                   </motion.span>
@@ -125,12 +125,36 @@ function XMark() {
   )
 }
 
-interface Line {
-  x1: number
-  y1: number
-  x2: number
-  y2: number
+/** Dashed circle around chain boxes — matches the official sheet. */
+function ChainRing() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute -inset-[5px] z-0 rounded-full border-[2.5px] border-dashed border-foreground sm:-inset-[6px] sm:border-[3px]"
+    />
+  )
 }
+
+interface ChainLink {
+  x: number
+  y1: number
+  y2: number
+  barHalf: number
+}
+
+/** Solid vertical link with horizontal caps (barbell shape). */
+function ChainLinkGraphic({ x, y1, y2, barHalf }: ChainLink) {
+  return (
+    <g className="text-foreground">
+      <line x1={x} y1={y1} x2={x} y2={y2} stroke="currentColor" strokeWidth={2.75} strokeLinecap="round" />
+      <line x1={x - barHalf} y1={y1} x2={x + barHalf} y2={y1} stroke="currentColor" strokeWidth={2.75} strokeLinecap="round" />
+      <line x1={x - barHalf} y1={y2} x2={x + barHalf} y2={y2} stroke="currentColor" strokeWidth={2.75} strokeLinecap="round" />
+    </g>
+  )
+}
+
+/** px the dashed ring extends beyond the cell edge */
+const RING_OUTSET = 5
 
 /** Four rows plus SVG connectors between linked chain cells. */
 export function ChainBoard({
@@ -144,7 +168,7 @@ export function ChainBoard({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cellRefs = useRef(new Map<string, HTMLButtonElement>())
-  const [lines, setLines] = useState<Line[]>([])
+  const [links, setLinks] = useState<ChainLink[]>([])
 
   const setCellRef = useCallback((color: ColorKey, index: number, el: HTMLButtonElement | null) => {
     const key = `${color}:${index}`
@@ -152,11 +176,11 @@ export function ChainBoard({
     else cellRefs.current.delete(key)
   }, [])
 
-  const measureLines = useCallback(() => {
+  const measureLinks = useCallback(() => {
     const container = containerRef.current
     if (!container) return
     const cRect = container.getBoundingClientRect()
-    const next: Line[] = []
+    const next: ChainLink[] = []
 
     for (const { a, b } of CHAIN_PAIRS) {
       const elA = cellRefs.current.get(`${a.color}:${a.index}`)
@@ -164,48 +188,40 @@ export function ChainBoard({
       if (!elA || !elB) continue
       const rA = elA.getBoundingClientRect()
       const rB = elB.getBoundingClientRect()
+      const x = rA.left + rA.width / 2 - cRect.left
+      const barHalf = Math.min(rA.width * 0.32, 14)
       next.push({
-        x1: rA.left + rA.width / 2 - cRect.left,
-        y1: rA.bottom - cRect.top,
-        x2: rB.left + rB.width / 2 - cRect.left,
-        y2: rB.top - cRect.top,
+        x,
+        y1: rA.bottom - cRect.top + RING_OUTSET,
+        y2: rB.top - cRect.top - RING_OUTSET,
+        barHalf,
       })
     }
-    setLines(next)
+    setLinks(next)
   }, [])
 
   useLayoutEffect(() => {
-    measureLines()
-    const ro = new ResizeObserver(measureLines)
+    measureLinks()
+    const ro = new ResizeObserver(measureLinks)
     if (containerRef.current) ro.observe(containerRef.current)
-    window.addEventListener("resize", measureLines)
+    window.addEventListener("resize", measureLinks)
     return () => {
       ro.disconnect()
-      window.removeEventListener("resize", measureLines)
+      window.removeEventListener("resize", measureLinks)
     }
-  }, [measureLines, rows])
+  }, [measureLinks, rows])
 
   return (
     <div ref={containerRef} className="relative">
-      {lines.length > 0 && (
-        <svg className="pointer-events-none absolute inset-0 z-10 h-full w-full overflow-visible" aria-hidden>
-          {lines.map((line, i) => (
-            <line
-              key={i}
-              x1={line.x1}
-              y1={line.y1}
-              x2={line.x2}
-              y2={line.y2}
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeDasharray="5 4"
-              className="text-foreground/45"
-            />
+      {links.length > 0 && (
+        <svg className="pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible" aria-hidden>
+          {links.map((link, i) => (
+            <ChainLinkGraphic key={i} {...link} />
           ))}
         </svg>
       )}
 
-      <div className="relative space-y-2 sm:space-y-2.5">
+      <div className="relative space-y-3 sm:space-y-4">
         {ROWS.map((config) => (
           <ChainScoreRow
             key={config.key}
