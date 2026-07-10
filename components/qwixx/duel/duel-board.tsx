@@ -5,10 +5,8 @@ import { Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   countPlayerTokensInRow,
-  getForemost,
   rowTokenScore,
   type DuelPlayerId,
-  type DuelPlacement,
   type DuelRowState,
   type DuelState,
   type PlacementKind,
@@ -47,14 +45,11 @@ function TokenStack({ owner, stack }: { owner: DuelPlayerId; stack: number }) {
 
 interface DuelBoardProps {
   state: DuelState
-  highlights: DuelPlacement[]
   onPlace: (color: ColorKey, index: number) => void
   disabled: boolean
 }
 
-export function DuelBoard({ state, highlights, onPlace, disabled }: DuelBoardProps) {
-  const highlightSet = new Set(highlights.map((h) => `${h.color}:${h.index}`))
-
+export function DuelBoard({ state, onPlace, disabled }: DuelBoardProps) {
   return (
     <div className="space-y-2 sm:space-y-2.5">
       {ROWS.map((config) => (
@@ -62,10 +57,6 @@ export function DuelBoard({ state, highlights, onPlace, disabled }: DuelBoardPro
           key={config.key}
           config={config}
           row={state.rows[config.key]}
-          p1Name={state.p1.name}
-          p2Name={state.p2.name}
-          highlightSet={highlightSet}
-          highlights={highlights.filter((h) => h.color === config.key)}
           disabled={disabled || state.rows[config.key].locked}
           onPlace={(index) => onPlace(config.key, index)}
         />
@@ -79,21 +70,15 @@ export function DuelBoard({ state, highlights, onPlace, disabled }: DuelBoardPro
 function DuelScoreRow({
   config,
   row,
-  highlightSet,
-  highlights,
   disabled,
   onPlace,
 }: {
   config: RowConfig
   row: DuelRowState
-  p1Name: string
-  p2Name: string
-  highlightSet: Set<string>
-  highlights: DuelPlacement[]
   disabled: boolean
   onPlace: (index: number) => void
 }) {
-  const foremost = getForemost(row)
+  const canTap = !disabled
 
   return (
     <div className={cn("flex items-center gap-1.5 rounded-2xl px-2 py-2 sm:gap-2 sm:px-3", config.band)}>
@@ -112,36 +97,26 @@ function DuelScoreRow({
       <div className="flex flex-1 items-center gap-1 sm:gap-1.5">
         {config.numbers.map((num, index) => {
           const token = row.tokens[index]
-          const key = `${config.key}:${index}`
-          const isHighlight = highlightSet.has(key)
-          const kind = highlights.find((h) => h.index === index)?.kind
-          const canPlace = isHighlight && !disabled
 
           return (
             <motion.button
               key={index}
               type="button"
-              disabled={!canPlace}
-              onClick={() => canPlace && onPlace(index)}
-              aria-label={`${config.label} ${num}${token ? `, ${PLAYER_STYLES[token.owner].label} token` : ""}${isHighlight ? ", available" : ""}`}
-              whileHover={canPlace ? { scale: 1.1 } : undefined}
-              whileTap={canPlace ? { scale: 0.92 } : undefined}
+              disabled={!canTap}
+              onClick={() => canTap && onPlace(index)}
+              aria-label={`${config.label} ${num}${token ? `, ${PLAYER_STYLES[token.owner].label} token` : ""}`}
+              whileHover={canTap ? { scale: 1.06 } : undefined}
+              whileTap={canTap ? { scale: 0.95 } : undefined}
               className={cn(
                 "relative flex aspect-square min-w-0 flex-1 items-center justify-center rounded-lg text-[13px] font-extrabold tabular-nums shadow-sm sm:rounded-xl sm:text-base",
                 config.cell,
                 config.ink,
-                canPlace && "cursor-pointer ring-2 ring-foreground ring-offset-1",
-                isHighlight && kind === "beat" && "ring-red-500",
-                isHighlight && kind === "stack" && "ring-emerald-500",
-                !canPlace && "cursor-default",
+                canTap ? "cursor-pointer" : "cursor-default",
                 row.locked && "opacity-80",
               )}
             >
               <span className={cn(token && "opacity-25")}>{num}</span>
               {token && <TokenStack owner={token.owner} stack={token.stack} />}
-              {foremost?.index === index && token && token.stack === 1 && (
-                <span className="pointer-events-none absolute -bottom-0.5 left-1/2 h-1 w-3 -translate-x-1/2 rounded-full bg-foreground/30" />
-              )}
             </motion.button>
           )
         })}

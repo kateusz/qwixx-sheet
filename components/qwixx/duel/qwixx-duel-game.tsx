@@ -15,7 +15,7 @@ import { VersionNav } from "../version-nav"
 import { DuelBoard, PlayerStatusBar } from "./duel-board"
 import { DuelEndModal } from "./duel-end-modal"
 import { DuelSettingsDialog } from "./duel-settings-dialog"
-import { DuelTurnPanel, duelHighlights, numberAt } from "./duel-turn-panel"
+import { DuelTurnPanel, numberAt } from "./duel-turn-panel"
 
 const STATE_KEY = "qwixx-duel-session-v1"
 const THEME_KEY = "qwixx-theme"
@@ -138,7 +138,6 @@ export function QwixxDuelGame() {
     )
   }
 
-  const highlights = duelHighlights(state)
   const gameOver = state.phase === "ended"
 
   return (
@@ -168,7 +167,6 @@ export function QwixxDuelGame() {
           <div className="min-w-[560px] sm:min-w-0">
             <DuelBoard
               state={state}
-              highlights={highlights}
               onPlace={handlePlace}
               disabled={gameOver || state.phase === "roll"}
             />
