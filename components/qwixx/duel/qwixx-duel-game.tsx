@@ -41,7 +41,7 @@ export function QwixxDuelGame() {
       if (raw) {
         const saved = JSON.parse(raw) as DuelState
         if (saved?.rows) {
-          setState({ ...saved, misthrowOwners: saved.misthrowOwners ?? [] })
+          setState({ ...saved, misthrowOwners: saved.misthrowOwners ?? [], turnPlaced: saved.turnPlaced ?? false })
         }
       }
     } catch {
@@ -103,11 +103,11 @@ export function QwixxDuelGame() {
 
     if (state.phase === "action1") {
       const kind = placementKindAt(state, state.active, color, index, num)!
-      setState({ ...next, action1: { color, index, kind }, phase: "action2" })
+      setState({ ...next, action1: { color, index, kind }, turnPlaced: true, phase: "action2" })
       return
     }
 
-    setState(finishTurn(next, true))
+    setState(finishTurn({ ...next, turnPlaced: true }, true))
   }
 
   function handleSkipAction1() {
@@ -115,9 +115,10 @@ export function QwixxDuelGame() {
   }
 
   function handleEndTurn() {
-    const placed = !!state.action1
-    setState((s) => finishTurn(s, placed))
-    if (!placed) play(sfx.penalty)
+    setState((s) => {
+      if (!s.turnPlaced) play(sfx.penalty)
+      return finishTurn(s, s.turnPlaced)
+    })
   }
 
   function newGame() {
