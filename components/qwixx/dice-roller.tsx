@@ -60,17 +60,10 @@ export function DiceRoller({
     }, 750)
   }
 
-  const whiteSum = values[0] + values[1]
-
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Dice</h2>
-          <p className="text-xs text-muted-foreground">
-            White total: <span className="font-bold text-foreground tabular-nums">{whiteSum}</span>
-          </p>
-        </div>
+        <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Dice</h2>
         <button
           type="button"
           onClick={roll}
