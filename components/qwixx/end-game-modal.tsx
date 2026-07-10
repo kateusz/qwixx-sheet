@@ -1,14 +1,14 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Trophy, RotateCcw } from "lucide-react"
+import { RotateCcw, Trophy } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { totalScore, type PlayerState } from "@/lib/qwixx"
+import { PENALTY_VALUE, ROWS, rowScore, totalScore, type PlayerState } from "@/lib/qwixx"
 
-const CONFETTI_COLORS = ["bg-red-500", "bg-yellow-400", "bg-green-500", "bg-blue-500"]
+const CONFETTI_COLORS = ["bg-red-500", "bg-yellow-400", "bg-green-600", "bg-blue-600"]
 
 function Confetti() {
-  const pieces = Array.from({ length: 40 })
+  const pieces = Array.from({ length: 44 })
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
       {pieces.map((_, i) => {
@@ -23,7 +23,7 @@ function Confetti() {
             className={cn("absolute top-0 rounded-sm", color)}
             style={{ left: `${left}%`, width: size, height: size }}
             initial={{ y: -20, opacity: 0, rotate: 0 }}
-            animate={{ y: 460, opacity: [0, 1, 1, 0], rotate: 360 * (Math.random() > 0.5 ? 1 : -1) }}
+            animate={{ y: 480, opacity: [0, 1, 1, 0], rotate: 360 * (Math.random() > 0.5 ? 1 : -1) }}
             transition={{ duration, delay, repeat: Number.POSITIVE_INFINITY, ease: "easeIn" }}
           />
         )
@@ -34,16 +34,14 @@ function Confetti() {
 
 interface EndGameModalProps {
   open: boolean
-  players: PlayerState[]
-  winners: PlayerState[]
+  player: PlayerState
+  reason: "locks" | "penalties" | null
   onNewGame: () => void
   onDismiss: () => void
 }
 
-export function EndGameModal({ open, players, winners, onNewGame, onDismiss }: EndGameModalProps) {
-  const ranked = [...players].sort((a, b) => totalScore(b) - totalScore(a))
-  const tie = winners.length > 1
-  const winnerNames = winners.map((w) => w.name).join(" & ")
+export function EndGameModal({ open, player, reason, onNewGame, onDismiss }: EndGameModalProps) {
+  const total = totalScore(player)
 
   return (
     <AnimatePresence>
@@ -78,29 +76,34 @@ export function EndGameModal({ open, players, winners, onNewGame, onDismiss }: E
               </motion.div>
               <h2 className="mt-4 text-2xl font-black text-balance text-foreground">Game Over!</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {tie ? "It's a tie between " : "Winner: "}
-                <span className="font-bold text-foreground">{winnerNames}</span>
+                {reason === "penalties" ? "You reached 4 penalties." : "You locked 2 rows."}
               </p>
 
-              <div className="mt-5 space-y-2 text-left">
-                {ranked.map((p, i) => {
-                  const isWinner = winners.some((w) => w.id === p.id)
-                  return (
-                    <div
-                      key={p.id}
-                      className={cn(
-                        "flex items-center justify-between rounded-xl px-3 py-2",
-                        isWinner ? "bg-yellow-400/15 ring-1 ring-yellow-400/50" : "bg-muted/60",
-                      )}
-                    >
-                      <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                        <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
-                        {p.name}
-                      </span>
-                      <span className="text-lg font-bold tabular-nums text-foreground">{totalScore(p)}</span>
-                    </div>
-                  )
-                })}
+              <div className="mt-4 rounded-2xl bg-muted/60 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Final score</div>
+                <div className="text-4xl font-black tabular-nums text-foreground">{total}</div>
+              </div>
+
+              <div className="mt-4 space-y-1.5 text-left">
+                {ROWS.map((r) => (
+                  <div key={r.key} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-1.5">
+                    <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <span className={cn("h-2.5 w-2.5 rounded-full", r.band)} />
+                      {r.label}
+                    </span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">
+                      {rowScore(player.rows[r.key])}
+                    </span>
+                  </div>
+                ))}
+                {player.penalties > 0 && (
+                  <div className="flex items-center justify-between rounded-lg bg-red-500/10 px-3 py-1.5">
+                    <span className="text-sm font-semibold text-red-600 dark:text-red-400">Penalties</span>
+                    <span className="text-sm font-bold tabular-nums text-red-600 dark:text-red-400">
+                      -{player.penalties * PENALTY_VALUE}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 flex gap-2">

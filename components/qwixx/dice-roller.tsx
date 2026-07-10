@@ -28,13 +28,20 @@ export interface DiceRoll {
   ts: number
 }
 
-export function DiceRoller({ onRoll }: { onRoll?: (roll: DiceRoll) => void }) {
+export function DiceRoller({
+  onRoll,
+  onRollStart,
+}: {
+  onRoll?: (roll: DiceRoll) => void
+  onRollStart?: () => void
+}) {
   const [values, setValues] = useState<number[]>(() => DICE.map(() => rand()))
   const [rolling, setRolling] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const roll = () => {
     if (rolling) return
+    onRollStart?.()
     setRolling(true)
     intervalRef.current = setInterval(() => {
       setValues(DICE.map(() => rand()))

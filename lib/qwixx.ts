@@ -5,55 +5,56 @@ export interface RowConfig {
   label: string
   /** Numbers in the order they must be marked (left to right on screen). */
   numbers: number[]
-  /** Direction the physical sheet reads. */
-  direction: "ltr" | "rtl"
-  /** Tailwind classes for theming this color. */
-  solid: string
-  soft: string
-  ring: string
-  text: string
+  /** Solid band background. */
+  band: string
+  /** Lighter cell background sitting on the band. */
+  cell: string
+  /** Number / X text color inside a cell. */
+  ink: string
+  /** Darker shade used for the flag pointer. */
+  flag: string
 }
 
+/**
+ * Board layout & theming. Red and yellow read 2 -> 12 (left to right),
+ * green and blue read 12 -> 2. These four colors are intrinsic to Qwixx.
+ */
 export const ROWS: RowConfig[] = [
   {
     key: "red",
     label: "Red",
     numbers: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    direction: "ltr",
-    solid: "bg-red-500",
-    soft: "bg-red-500/10",
-    ring: "ring-red-500",
-    text: "text-red-600 dark:text-red-400",
+    band: "bg-red-500",
+    cell: "bg-red-200",
+    ink: "text-red-700",
+    flag: "text-red-700",
   },
   {
     key: "yellow",
     label: "Yellow",
     numbers: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    direction: "ltr",
-    solid: "bg-yellow-400",
-    soft: "bg-yellow-400/15",
-    ring: "ring-yellow-400",
-    text: "text-yellow-600 dark:text-yellow-400",
+    band: "bg-yellow-400",
+    cell: "bg-yellow-100",
+    ink: "text-yellow-700",
+    flag: "text-yellow-600",
   },
   {
     key: "green",
     label: "Green",
     numbers: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2],
-    direction: "rtl",
-    solid: "bg-green-500",
-    soft: "bg-green-500/10",
-    ring: "ring-green-500",
-    text: "text-green-600 dark:text-green-400",
+    band: "bg-green-600",
+    cell: "bg-green-200",
+    ink: "text-green-800",
+    flag: "text-green-800",
   },
   {
     key: "blue",
     label: "Blue",
     numbers: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2],
-    direction: "rtl",
-    solid: "bg-blue-500",
-    soft: "bg-blue-500/10",
-    ring: "ring-blue-500",
-    text: "text-blue-600 dark:text-blue-400",
+    band: "bg-blue-600",
+    cell: "bg-blue-200",
+    ink: "text-blue-800",
+    flag: "text-blue-900",
   },
 ]
 
@@ -62,7 +63,7 @@ export function pointsForMarks(count: number): number {
   return (count * (count + 1)) / 2
 }
 
-/** The full conversion table for reference display. */
+/** The full conversion table for the rules reference. */
 export const CONVERSION_TABLE: { marks: number; points: number }[] = Array.from({ length: 12 }, (_, i) => ({
   marks: i + 1,
   points: pointsForMarks(i + 1),
@@ -90,7 +91,7 @@ export function emptyRow(): RowState {
   return { marks: [], locked: false }
 }
 
-export function createPlayer(name: string): PlayerState {
+export function createPlayer(name = "Player"): PlayerState {
   return {
     id: Math.random().toString(36).slice(2, 9),
     name,
@@ -114,40 +115,52 @@ export function rowScore(row: RowState): number {
 }
 
 export function totalScore(player: PlayerState): number {
-  const rowsTotal = (Object.keys(player.rows) as ColorKey[]).reduce(
-    (sum, key) => sum + rowScore(player.rows[key]),
-    0,
-  )
+  const rowsTotal = (Object.keys(player.rows) as ColorKey[]).reduce((sum, key) => sum + rowScore(player.rows[key]), 0)
   return rowsTotal - player.penalties * PENALTY_VALUE
 }
 
-export type CellStatus = "marked" | "available" | "skipped" | "closed"
+export function totalMarks(player: PlayerState): number {
+  return (Object.keys(player.rows) as ColorKey[]).reduce((sum, key) => sum + rowMarkCount(player.rows[key]), 0)
+}
+
+export type CellStatus = "marked" | "available" | "skipped" | "locked-out"
 
 /** Highest marked index, or -1 if none. */
 function maxMarkedIndex(row: RowState): number {
   return row.marks.length ? Math.max(...row.marks) : -1
 }
 
-export function cellStatus(row: RowState, index: number): CellStatus {
-  if (row.marks.includes(index)) return "marked"
-  if (row.locked) return "closed"
-  if (index > maxMarkedIndex(row)) return "available"
-  return "skipped"
+/**
+ * Official rule: numbers must be crossed from left to right, a number can only
+ * be crossed if it is to the right of every previous cross, and the final
+ * (right-most) number requires at least five crosses in the row beforehand.
+ */
+export function canMarkCell(row: RowState, index: number, rowLength: number): boolean {
+  if (row.locked) return false
+  if (row.marks.includes(index)) return false
+  if (index <= maxMarkedIndex(row)) return false
+  const isLast = index === rowLength - 1
+  if (isLast && row.marks.length < MIN_MARKS_TO_LOCK) return false
+  return true
 }
 
-export function canLockRow(row: RowState): boolean {
-  return !row.locked && rowMarkCount(row) >= MIN_MARKS_TO_LOCK
+export function cellStatus(row: RowState, index: number, rowLength: number): CellStatus {
+  if (row.marks.includes(index)) return "marked"
+  if (row.locked) return "locked-out"
+  if (canMarkCell(row, index, rowLength)) return "available"
+  return index <= maxMarkedIndex(row) ? "skipped" : "locked-out"
+}
+
+/** Crossing the right-most number closes the row (only allowed after 5 marks). */
+export function willLockRow(row: RowState, index: number, rowLength: number): boolean {
+  return index === rowLength - 1 && canMarkCell(row, index, rowLength)
 }
 
 export function lockedRowCount(player: PlayerState): number {
   return (Object.keys(player.rows) as ColorKey[]).filter((k) => player.rows[k].locked).length
 }
 
-export function isGameOver(players: PlayerState[]): boolean {
-  return players.some((p) => lockedRowCount(p) >= LOCKS_TO_END || p.penalties >= MAX_PENALTIES)
-}
-
-export function getWinners(players: PlayerState[]): PlayerState[] {
-  const best = Math.max(...players.map(totalScore))
-  return players.filter((p) => totalScore(p) === best)
+/** Solo session ends at 4 penalties or 2 locked rows (official end conditions). */
+export function isGameOver(player: PlayerState): boolean {
+  return lockedRowCount(player) >= LOCKS_TO_END || player.penalties >= MAX_PENALTIES
 }
