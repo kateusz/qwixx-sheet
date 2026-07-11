@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils"
 
 const MODES = [
   { href: "/", id: "classic", label: "Classic" },
+  { href: "/classic-ai", id: "classic-ai", label: "vs AI" },
   { href: "/chains", id: "chains", label: "Chains" },
   { href: "/duel", id: "duel", label: "Duel" },
 ] as const
