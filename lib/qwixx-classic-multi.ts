@@ -149,6 +149,38 @@ export function isValidMove(state: ClassicGameState, player: ClassicPlayerId, co
   return false
 }
 
+/** Remove a mark during the player's white or color phase (tap marked cell again). */
+export function unmarkCell(
+  state: ClassicGameState,
+  player: ClassicPlayerId,
+  color: ColorKey,
+  index: number,
+): ClassicGameState | null {
+  const p = playerRef(state, player)
+  const row = p.rows[color]
+  if (!row.marks.includes(index)) return null
+
+  const isWhitePhase =
+    (state.phase === "whiteHuman" && player === "human") || (state.phase === "whiteAi" && player === "ai")
+  const isColorPhase =
+    (state.phase === "colorHuman" && player === "human" && state.active === "human") ||
+    (state.phase === "colorAi" && player === "ai" && state.active === "ai")
+  if (!isWhitePhase && !isColorPhase) return null
+
+  const len = rowLength(color)
+  const lockIdx = len - 1
+  const newMarks = row.marks.filter((i) => i !== index)
+  const nextPlayer = clonePlayer(p)
+  nextPlayer.rows[color] = { marks: newMarks, locked: row.locked && newMarks.includes(lockIdx) }
+
+  let next = setPlayer(state, player, nextPlayer)
+  if (isWhitePhase && player === "human") next = { ...next, humanWhiteUsed: false }
+  if (isWhitePhase && player === "ai") next = { ...next, aiWhiteUsed: false }
+  if (isColorPhase) next = { ...next, colorMoveUsed: false }
+  if (player === state.active) next = { ...next, turnPlaced: false }
+  return next
+}
+
 export function applyMark(
   state: ClassicGameState,
   player: ClassicPlayerId,

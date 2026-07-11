@@ -77,7 +77,7 @@ export function ClassicAiSettingsDialog({
             <div className="mb-4">
               <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted-foreground">AI difficulty</span>
               <div className="flex gap-2">
-                {(["easy", "normal"] as const).map((d) => (
+                {(["easy", "normal", "hard"] as const).map((d) => (
                   <button
                     key={d}
                     type="button"
