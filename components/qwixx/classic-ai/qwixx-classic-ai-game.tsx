@@ -10,6 +10,7 @@ import {
   isValidMove,
   rollDice,
   skipWhiteHuman,
+  unmarkCell,
   type ClassicGameState,
 } from "@/lib/qwixx-classic-multi"
 import { runAiColor, runAiRoll, runAiWhiteSum, type AiDifficulty } from "@/lib/qwixx-ai"
@@ -156,6 +157,13 @@ export function QwixxClassicAiGame() {
   }
 
   function handleHumanMark(color: ColorKey, index: number) {
+    if (state.human.rows[color].marks.includes(index)) {
+      const next = unmarkCell(state, "human", color, index)
+      if (!next) return
+      play(sfx.mark)
+      setState(next)
+      return
+    }
     if (!isValidMove(state, "human", color, index)) return
     const next = applyMark(state, "human", color, index)
     if (!next) return
