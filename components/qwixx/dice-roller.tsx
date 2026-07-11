@@ -20,6 +20,28 @@ const DICE: DieDef[] = [
   { id: "blue", color: "bg-blue-500", textColor: "text-white" },
 ]
 
+/** Six dice faces only — no sums, labels, or combination hints (e.g. w3+y1=4). */
+export function DiceFaces({ values, size = "sm" }: { values: number[]; size?: "sm" | "md" }) {
+  const die = size === "md" ? "h-7 w-7 text-sm" : "h-5 w-5 text-xs"
+  return (
+    <div className="flex items-center gap-1 tabular-nums">
+      {DICE.map((dieDef, i) => (
+        <span
+          key={dieDef.id}
+          className={cn(
+            "flex items-center justify-center rounded font-bold shadow-sm",
+            die,
+            dieDef.color,
+            dieDef.textColor,
+          )}
+        >
+          {values[i]}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 const rand = () => Math.floor(Math.random() * 6) + 1
 
 export interface DiceRoll {
