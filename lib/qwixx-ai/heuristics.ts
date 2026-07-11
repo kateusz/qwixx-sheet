@@ -1,5 +1,11 @@
-import { MIN_MARKS_TO_LOCK, ROWS, pointsForMarks, rowMarkCount, type ColorKey } from "../qwixx"
-import type { EvalResult, GameState, RowKey } from "./gameState"
+import { MAX_PENALTIES, MIN_MARKS_TO_LOCK, ROWS, pointsForMarks, rowMarkCount, type ColorKey } from "../qwixx"
+import {
+  atDeathDoor,
+  forcedMissPlanningPenalty,
+  investedRowUrgency,
+  scoreMoveHardRules,
+} from "./hardRules"
+import type { EvalResult, GameState, Move, RowKey } from "./gameState"
 
 export interface HeuristicWeights {
   lockProgress: number
@@ -7,6 +13,20 @@ export interface HeuristicWeights {
   edgePenalty: number
   edgeRewardAfterFive: number
   blockOpponent: number
+  /** Hard rule: bonus for finishing focus rows (5–6 marks). */
+  focusRowBonus: number
+  /** Hard rule: penalty for marginal marks in empty rows while focus rows exist. */
+  marginalRowPenalty: number
+  /** Hard rule: red/yellow 6–8 flexibility bonus. */
+  middleNumberBonus: number
+  /** Hard rule: seize lock when 5+ marks and last cell is legal. */
+  lockNowBonus: number
+  /** Hard rule: urgency when opponent may lock a row we invested in. */
+  investedRowUrgency: number
+  /** Hard rule: weight for P(forced miss) in evaluation. */
+  forcedMissWeight: number
+  /** Multiplier on forced-miss cost at 3 penalties (next ends game). */
+  deathDoorMissMultiplier: number
 }
 
 export const DEFAULT_WEIGHTS: HeuristicWeights = {
@@ -15,6 +35,13 @@ export const DEFAULT_WEIGHTS: HeuristicWeights = {
   edgePenalty: 2.5,
   edgeRewardAfterFive: 1.5,
   blockOpponent: 3,
+  focusRowBonus: 10,
+  marginalRowPenalty: 14,
+  middleNumberBonus: 12,
+  lockNowBonus: 22,
+  investedRowUrgency: 5,
+  forcedMissWeight: 4,
+  deathDoorMissMultiplier: 8,
 }
 
 const COLORS: RowKey[] = ["red", "yellow", "green", "blue"]
@@ -76,7 +103,7 @@ function flexibilityTerm(state: GameState, w: HeuristicWeights): number {
   return term
 }
 
-/** Increase value of rows where opponent is close to locking. */
+/** Increase value of rows where opponent is close to locking (legacy term). */
 function blockOpponentTerm(state: GameState, w: HeuristicWeights): number {
   let term = 0
   for (const c of COLORS) {
@@ -97,11 +124,35 @@ export function evaluateState(state: GameState, weights: HeuristicWeights = DEFA
   const missPen = missPenalty(state, weights)
   const flexibility = flexibilityTerm(state, weights)
   const blockOpponent = blockOpponentTerm(state, weights)
-  const score = rowScore + lockBonus - missPen + flexibility + blockOpponent
+  const investedUrgency = investedRowUrgency(state, weights)
+  const forcedMiss = forcedMissPlanningPenalty(state, weights)
+  const deathDoor =
+    atDeathDoor(state) && state.selfIsActive ? (MAX_PENALTIES - state.missCount) * -15 : 0
+  const hardRules = investedUrgency - forcedMiss + deathDoor
+  const score = rowScore + lockBonus - missPen + flexibility + blockOpponent + hardRules
   return {
     score,
-    breakdown: { rowScore, lockBonus, missPenalty: missPen, flexibility, blockOpponent },
+    breakdown: {
+      rowScore,
+      lockBonus,
+      missPenalty: missPen,
+      flexibility,
+      blockOpponent,
+      hardRules,
+    },
   }
+}
+
+/** Leaf + move scoring: base eval delta plus hard-rule move adjustments. */
+export function evaluateMove(
+  state: GameState,
+  move: Move,
+  childScore: number,
+  parentScore: number,
+  weights: HeuristicWeights = DEFAULT_WEIGHTS,
+): number {
+  const delta = childScore - parentScore
+  return move.kind === "mark" ? delta + scoreMoveHardRules(state, move, weights) : delta
 }
 
 /** Perspective flip for simulating opponent ply. */

@@ -1,6 +1,7 @@
 import { buildSixDiceOutcomes, diceRollFromValues } from "./diceProbabilities"
+import { filterMovesAtThreeMisses, scoreMoveHardRules } from "./hardRules"
 import { cloneGameState, isTerminal, type GameState, type Move } from "./gameState"
-import { evaluateState, swapPerspective, type HeuristicWeights } from "./heuristics"
+import { evaluateState, swapPerspective, DEFAULT_WEIGHTS, type HeuristicWeights } from "./heuristics"
 import {
   advanceAfterSelfMove,
   advancePhase,
@@ -38,7 +39,14 @@ export function expectimax(
     return chanceNode(state, depth, opts)
   }
 
-  const moves = currentDecisionMoves(state, isActivePlayer)
+  const rawMoves = currentDecisionMoves(state, isActivePlayer)
+  const parentScore = evaluateState(state, opts.weights).score
+  const moves = filterMovesAtThreeMisses(state, rawMoves, (move) => {
+    const child = resolveDecision(state, move, isActivePlayer)
+    const delta = evaluateState(child, opts.weights).score - parentScore
+    return move.kind === "mark" ? delta + scoreMoveHardRules(state, move, opts.weights ?? DEFAULT_WEIGHTS) : delta
+  })
+
   if (moves.length === 0) {
     return { value: evaluateState(state, opts.weights).score, move: null }
   }
@@ -48,6 +56,7 @@ export function expectimax(
   for (const move of moves) {
     const child = resolveDecision(state, move, isActivePlayer)
     const isSelfDecision = isSelfTurn(state)
+    const childScore = evaluateState(child, opts.weights).score
     let value: number
 
     if (child.phase === "roll" && depth > 1) {
@@ -57,6 +66,10 @@ export function expectimax(
     } else {
       // Opponent minimizes our equity.
       value = expectimax(swapPerspective(child), depth - 1, !isActivePlayer, opts).value
+    }
+
+    if (isSelfDecision && move.kind === "mark") {
+      value += scoreMoveHardRules(state, move, opts.weights ?? DEFAULT_WEIGHTS)
     }
 
     if (value > best.value) {
@@ -133,18 +146,28 @@ export function pickBestMove(
   opts?: ExpectimaxOptions,
 ): Move | null {
   if (!state.roll) return null
-  const moves =
+  const rawMoves =
     state.phase === "colorSelf" && state.selfIsActive
       ? generateLegalMoves({ ...state, selfWhiteUsed: true }, state.roll, true)
       : generateLegalMoves(state, state.roll, isActivePlayer)
 
+  const parentScore = evaluateState(state, opts?.weights).score
+  const moves = filterMovesAtThreeMisses(state, rawMoves, (move) => {
+    const child = resolveDecision(cloneGameState(state), move, isActivePlayer)
+    const delta = evaluateState(child, opts?.weights).score - parentScore
+    return move.kind === "mark" ? delta + scoreMoveHardRules(state, move, opts?.weights ?? DEFAULT_WEIGHTS) : delta
+  })
+
   let best: ExpectimaxResult = { value: -Infinity, move: null }
   for (const move of moves) {
     const child = resolveDecision(cloneGameState(state), move, isActivePlayer)
-    const value =
+    let value =
       child.phase === "roll" && depth > 1
         ? chanceNode(child, depth - 1, opts ?? {}).value
         : evaluateState(child, opts?.weights).score
+    if (move.kind === "mark") {
+      value += scoreMoveHardRules(state, move, opts?.weights ?? DEFAULT_WEIGHTS)
+    }
     if (value > best.value) {
       best = { value, move }
     }

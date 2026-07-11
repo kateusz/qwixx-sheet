@@ -62,6 +62,7 @@ export interface EvalResult {
     missPenalty: number
     flexibility: number
     blockOpponent: number
+    hardRules: number
   }
 }
 

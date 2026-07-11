@@ -1,3 +1,4 @@
+export * from "./hardRules"
 export * from "./gameState"
 export * from "./diceProbabilities"
 export * from "./moveGenerator"

@@ -13,7 +13,9 @@ import {
 import { totalScore } from "./qwixx"
 import { classicToGameState, moveToClassic } from "./qwixx-ai/classicAdapter"
 import { pickBestMove } from "./qwixx-ai/expectimax"
+import { scoreMoveHardRules } from "./qwixx-ai/hardRules"
 import { DEFAULT_WEIGHTS } from "./qwixx-ai/heuristics"
+import type { Move } from "./qwixx-ai/gameState"
 
 export type AiDifficulty = "easy" | "normal" | "hard"
 
@@ -36,6 +38,10 @@ function rankMove(state: ClassicGameState, player: "ai", move: ClassicMove): num
   const len = p.rows[move.color].marks.length
   if (len === 4) rank += 8
   if (len >= 5) rank += 3
+
+  const gs = classicToGameState(state, "ai")
+  const aiMove: Move = { kind: "mark", color: move.color, index: move.index, number: move.number }
+  rank += scoreMoveHardRules(gs, aiMove, DEFAULT_WEIGHTS)
   return rank
 }
 
