@@ -1,0 +1,22 @@
+{
+  "lockProgress": 3.064830912672831,
+  "missExponent": 2.7753953609566944,
+  "edgePenalty": 0.5092005723737948,
+  "edgeRewardAfterFive": 2.0806680185841953,
+  "blockOpponent": 0.4520516214341411,
+  "focusRowBonus": 3.301291997154919,
+  "marginalRowPenalty": 5.2494059266342985,
+  "middleNumberBonus": 0.5706616675904048,
+  "lockNowBonus": 3.0988214372150207,
+  "investedRowUrgency": 0.874467746741602,
+  "forcedMissWeight": 0.10451335858828936,
+  "deathDoorMissMultiplier": 5.140303486024987,
+  "oppWeight": 1.3084591649392308,
+  "passWhite": -0.07538271164768362,
+  "passColor": 0.019941986619538665,
+  "continuationBonus": 0.9625944371510538,
+  "startRowBonus": 2.5890497583728282,
+  "strandedPenalty": 11.829507179861501,
+  "almostLock": 1.6125127485693957,
+  "endWhileBehind": 16.165730412363786
+}
