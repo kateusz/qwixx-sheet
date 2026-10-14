@@ -252,7 +252,8 @@ function render(s) {
   </tr>`).join("") || `<tr><td colspan="5" class="empty">Brak pokoleń</td></tr>`
   const champ = s.champion || {}
   el("weights").innerHTML = Object.keys(champ).map((k) => `<div class="wrow"><span>${LABELS[k] || k}</span><b>${Number(champ[k]).toFixed(2)}</b></div>`).join("") || `<div class="empty">Brak wag</div>`
-  el("foot").textContent = `Ostatnia aktualizacja ${when(s.updatedAt)} · odświeżanie co 2 s`
+  const errLine = s.lastError ? ` · błąd: ${String(s.lastError).split("\n")[0]}` : ""
+  el("foot").textContent = `Ostatnia aktualizacja ${when(s.updatedAt)} · odświeżanie co 2 s${errLine}`
 }
 
 async function tick() {

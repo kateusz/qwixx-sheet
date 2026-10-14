@@ -7,7 +7,7 @@
  *   sudo ./scripts/qwixx-trainctl.sh install
  *   sudo ./scripts/qwixx-trainctl.sh start
  *   sudo ./scripts/qwixx-trainctl.sh stop
- * Panel: the URL printed by install (port 8787).
+ * Panel: the public URL printed by install.
  *
  * --hours 0 runs until the process is stopped. Checkpoint: training/checkpoint.json.
  * Live stats: training/status.json. Improved weights: lib/qwixx-ai/tuned-weights.json.
@@ -103,7 +103,7 @@ function bench() {
   )
 }
 
-function main() {
+async function main() {
   if (process.argv.includes("--bench")) {
     bench()
     return
@@ -131,22 +131,27 @@ function main() {
   let history: { gen: number; vsTaker: number | null; sigma: number; event: string; at: string }[] = []
   let bestVs = Number.NEGATIVE_INFINITY
   let kept = 0
+  let lastError: string | null = null
   try {
     const prev = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
       history?: typeof history
       bestVsTaker?: number
       kept?: number
+      lastError?: string
     }
     if (Array.isArray(prev.history)) history = prev.history.slice(-240)
     if (typeof prev.bestVsTaker === "number") bestVs = prev.bestVsTaker
     if (typeof prev.kept === "number") kept = prev.kept
+    if (typeof prev.lastError === "string" && prev.lastError) lastError = prev.lastError
   } catch {
     /* first run */
   }
   if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
   const startGen = cp.generation
 
-  const publish = (state: "running" | "evaluating" | "stopped" | "done") => {
+  const publish = (state: "running" | "evaluating" | "stopped" | "done", opts?: { error?: unknown; clearError?: boolean }) => {
+    if (opts?.error) lastError = errorText(opts.error)
+    if (opts?.clearError) lastError = null
     const elapsed = Date.now() - startedMs
     writeJson(statusPath, {
       state,
@@ -165,8 +170,30 @@ function main() {
       hoursLimit: hours <= 0 ? null : hours,
       champion: cp.champion,
       history,
+      lastError,
     })
   }
+
+  // A journal restart delivers EPIPE. That must not take the process down.
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EPIPE") return
+      throw err
+    })
+  }
+
+  let crashing = false
+  process.on("uncaughtException", (err) => {
+    if (crashing) process.exit(1)
+    crashing = true
+    try {
+      publish("stopped", { error: err })
+    } catch {
+      /* status file may be unwritable */
+    }
+    console.error(err)
+    process.exit(1)
+  })
 
   console.log(
     `train start gen=${cp.generation} sigma=${cp.sigma.toFixed(3)} games=${games} lambda=${lambda} hours=${hours <= 0 ? "unlimited" : hours}`,
@@ -194,67 +221,82 @@ function main() {
     process.exit(0)
   })
 
+  let strikes = 0
   while (cp.generation < maxGen && Date.now() < deadline) {
     const gen = cp.generation + 1
     publish("evaluating")
-    const seeds = generationSeeds(gen, games, salt)
-    const rng = makeRng((gen * 17 + salt) >>> 0)
-    const champMargin = marginBetween(cp.champion, "taker", seeds)
+    try {
+      const seeds = generationSeeds(gen, games, salt)
+      const rng = makeRng((gen * 17 + salt) >>> 0)
+      const champMargin = marginBetween(cp.champion, "taker", seeds)
 
-    let best = cp.champion
-    let bestMargin = champMargin
-    for (let k = 0; k < lambda; k++) {
-      const child = mutateWeights(cp.champion, cp.sigma, rng)
-      const margin = marginBetween(child, "taker", seeds)
-      if (margin > bestMargin) {
-        best = child
-        bestMargin = margin
+      let best = cp.champion
+      let bestMargin = champMargin
+      for (let k = 0; k < lambda; k++) {
+        const child = mutateWeights(cp.champion, cp.sigma, rng)
+        const margin = marginBetween(child, "taker", seeds)
+        if (margin > bestMargin) {
+          best = child
+          bestMargin = margin
+        }
       }
-    }
 
-    let improved = best !== cp.champion && bestMargin > champMargin + 1
-    if (improved) {
-      const confirm = generationSeeds(gen, games, salt + 7919)
-      const holdChild = marginBetween(best, "taker", confirm)
-      const holdChamp = marginBetween(cp.champion, "taker", confirm)
-      improved = holdChild > holdChamp + 0.75
-      if (improved) bestMargin = (bestMargin + holdChild) / 2
-    }
-    cp.generation = gen
-    cp.vsTaker = improved ? bestMargin : champMargin
-    if (improved) {
-      cp.champion = best
-      cp.stall = 0
-      cp.sigma = Math.max(0.08, cp.sigma * 0.98)
-      writeJson(weightsPath, cp.champion)
-    } else {
-      cp.stall += 1
-      cp.sigma = Math.max(0.08, cp.sigma * 0.995)
-      if (cp.stall >= 20) {
-        cp.sigma = 0.45
+      let improved = best !== cp.champion && bestMargin > champMargin + 1
+      if (improved) {
+        const confirm = generationSeeds(gen, games, salt + 7919)
+        const holdChild = marginBetween(best, "taker", confirm)
+        const holdChamp = marginBetween(cp.champion, "taker", confirm)
+        improved = holdChild > holdChamp + 0.75
+        if (improved) bestMargin = (bestMargin + holdChild) / 2
+      }
+      cp.generation = gen
+      cp.vsTaker = improved ? bestMargin : champMargin
+      if (improved) {
+        cp.champion = best
         cp.stall = 0
+        cp.sigma = Math.max(0.08, cp.sigma * 0.98)
+        writeJson(weightsPath, cp.champion)
+      } else {
+        cp.stall += 1
+        cp.sigma = Math.max(0.08, cp.sigma * 0.995)
+        if (cp.stall >= 20) {
+          cp.sigma = 0.45
+          cp.stall = 0
+        }
       }
-    }
-    save()
-    const event = improved ? "keep" : "stay"
-    if (improved) kept += 1
-    if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
-    history.push({
-      gen,
-      vsTaker: round(cp.vsTaker),
-      sigma: round(cp.sigma),
-      event,
-      at: new Date().toISOString(),
-    })
-    if (history.length > 240) history = history.slice(-240)
-    publish("running")
+      save()
+      const event = improved ? "keep" : "stay"
+      if (improved) kept += 1
+      if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
+      history.push({
+        gen,
+        vsTaker: round(cp.vsTaker),
+        sigma: round(cp.sigma),
+        event,
+        at: new Date().toISOString(),
+      })
+      if (history.length > 240) history = history.slice(-240)
+      strikes = 0
+      publish("running", { clearError: true })
 
-    if (improved || gen % 25 === 0) {
-      const elapsedH = (Date.now() - startedMs) / 3_600_000
-      console.log(
-        `gen ${gen}  vsTaker ${cp.vsTaker.toFixed(2)}  sigma ${cp.sigma.toFixed(3)}  ${improved ? "KEEP" : "stay"}  ${elapsedH.toFixed(2)}h`,
-      )
+      if (improved || gen % 25 === 0) {
+        const elapsedH = (Date.now() - startedMs) / 3_600_000
+        console.log(
+          `gen ${gen}  vsTaker ${cp.vsTaker.toFixed(2)}  sigma ${cp.sigma.toFixed(3)}  ${improved ? "KEEP" : "stay"}  ${elapsedH.toFixed(2)}h`,
+        )
+      }
+    } catch (err) {
+      // Skip the poisoned generation so the same seeds cannot wedge the service.
+      strikes += 1
+      cp.generation = gen
+      cp.stall += 1
+      save()
+      publish(strikes >= 3 ? "stopped" : "running", { error: err })
+      console.error(`gen ${gen} failed`, err)
+      if (strikes >= 3) process.exit(1)
     }
+    // Let SIGINT/SIGTERM run. A tight loop never reaches the handler, so stop looked like a kill.
+    await yieldTick()
   }
 
   shutdown("done")
@@ -265,4 +307,16 @@ function round(n: number): number | null {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : null
 }
 
-main()
+function errorText(err: unknown): string {
+  const text = err instanceof Error ? err.stack || err.message : String(err)
+  return text.slice(0, 2000)
+}
+
+function yieldTick(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

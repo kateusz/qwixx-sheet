@@ -1,14 +1,20 @@
 [Unit]
 Description=Qwixx AI weight training
 After=network.target
+# A crash loop must not stick the unit in "failed" after five tries.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=__USER__
 WorkingDirectory=__ROOT__
-ExecStart=__NODE__ __ROOT__/node_modules/tsx/dist/cli.mjs __ROOT__/scripts/train-qwixx-ai.ts --hours 0 --games 32
+# In-process loader. The tsx CLI parent made systemd's main PID a process
+# that does not run the trainer, so a child crash left the unit failed.
+ExecStart=__NODE__ --import __ROOT__/node_modules/tsx/dist/loader.mjs __ROOT__/scripts/train-qwixx-ai.ts --hours 0 --games 32
 Restart=on-failure
 RestartSec=5
+# Default OOMPolicy=stop can look like a clean stop and skip Restart=.
+OOMPolicy=kill
 KillSignal=SIGINT
 TimeoutStopSec=30
 

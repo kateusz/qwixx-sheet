@@ -137,11 +137,21 @@ EOF
       const p = process.argv[1];
       let s = {};
       try { s = JSON.parse(fs.readFileSync(p, "utf8")); } catch { console.log("brak training/status.json"); process.exit(0); }
-      const alive = (() => { try { process.kill(s.pid, 0); return true; } catch { return false; } })();
+      const alive = (() => {
+        if (!s.pid) return false;
+        try { process.kill(s.pid, 0); return true; }
+        catch (e) { return e.code === "EPERM"; }
+      })();
+      let state = s.state;
+      if ((state === "running" || state === "evaluating") && !alive) state = "przerwany";
+      if (!alive && (s.state === "running" || s.state === "evaluating")) {
+        console.error("Proces padl w trakcie pracy, jednostka go nie trzyma. Dziennik: journalctl -u qwixx-train -n 40 --no-pager");
+        if (s.lastError) console.error(String(s.lastError).split("\n")[0]);
+      }
       console.log(JSON.stringify({
-        state: s.state, pidAlive: alive, generation: s.generation, vsTaker: s.vsTaker,
+        state, pidAlive: alive, generation: s.generation, vsTaker: s.vsTaker,
         bestVsTaker: s.bestVsTaker, sigma: s.sigma, stall: s.stall, kept: s.kept,
-        gensPerHour: s.gensPerHour, updatedAt: s.updatedAt
+        gensPerHour: s.gensPerHour, updatedAt: s.updatedAt, lastError: s.lastError || null
       }, null, 2));
     ' "$ROOT/training/status.json"
     ;;
