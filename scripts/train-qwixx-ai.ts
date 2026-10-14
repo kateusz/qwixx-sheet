@@ -1,14 +1,16 @@
 /**
  * Train Qwixx heuristic weights on one CPU core.
  *
- *   pnpm train:ai -- --hours 168 --games 24
+ *   pnpm train:ai -- --hours 168 --games 32
  *
- * Stop with Ctrl+C — the checkpoint is saved every generation and the run
- * resumes from training/checkpoint.json. When a generation beats the current
- * weights, they are written to lib/qwixx-ai/tuned-weights.json (what the app loads).
+ * On a VPS, prefer the service (no hanging SSH):
+ *   sudo ./scripts/qwixx-trainctl.sh install
+ *   sudo ./scripts/qwixx-trainctl.sh start
+ *   sudo ./scripts/qwixx-trainctl.sh stop
+ * Panel: the URL printed by install (port 8787).
  *
- * Memory stays under ~100 MB. A week is far more generations than the search needs;
- * check the log for "vsTaker" — once it stops climbing for a long time, stop the job.
+ * --hours 0 runs until the process is stopped. Checkpoint: training/checkpoint.json.
+ * Live stats: training/status.json. Improved weights: lib/qwixx-ai/tuned-weights.json.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -35,6 +37,7 @@ function argPath(name: string, fallback: string): string {
 const root = path.resolve(import.meta.dirname, "..")
 const checkpointPath = argPath("checkpoint", path.join(root, "training", "checkpoint.json"))
 const weightsPath = argPath("weights", path.join(root, "lib", "qwixx-ai", "tuned-weights.json"))
+const statusPath = argPath("status", path.join(root, "training", "status.json"))
 
 function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(`--${name}`)
@@ -111,7 +114,8 @@ function main() {
   const lambda = arg("lambda", 6)
   const maxGen = arg("generations", 1_000_000)
   const salt = arg("seed", 1)
-  const deadline = Date.now() + hours * 3600 * 1000
+  const startedMs = Date.now()
+  const deadline = hours <= 0 ? Number.POSITIVE_INFINITY : startedMs + hours * 3600 * 1000
 
   let cp: Checkpoint = loadCheckpoint() ?? {
     generation: 0,
@@ -123,9 +127,51 @@ function main() {
     updatedAt: new Date().toISOString(),
   }
 
+  const startedAt = new Date(startedMs).toISOString()
+  let history: { gen: number; vsTaker: number | null; sigma: number; event: string; at: string }[] = []
+  let bestVs = Number.NEGATIVE_INFINITY
+  let kept = 0
+  try {
+    const prev = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
+      history?: typeof history
+      bestVsTaker?: number
+      kept?: number
+    }
+    if (Array.isArray(prev.history)) history = prev.history.slice(-240)
+    if (typeof prev.bestVsTaker === "number") bestVs = prev.bestVsTaker
+    if (typeof prev.kept === "number") kept = prev.kept
+  } catch {
+    /* first run */
+  }
+  if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
+  const startGen = cp.generation
+
+  const publish = (state: "running" | "evaluating" | "stopped" | "done") => {
+    const elapsed = Date.now() - startedMs
+    writeJson(statusPath, {
+      state,
+      pid: process.pid,
+      startedAt,
+      updatedAt: new Date().toISOString(),
+      generation: cp.generation,
+      sigma: round(cp.sigma),
+      stall: cp.stall,
+      vsTaker: round(cp.vsTaker),
+      bestVsTaker: round(bestVs),
+      games,
+      lambda,
+      kept,
+      gensPerHour: elapsed > 0 ? round(((cp.generation - startGen) / elapsed) * 3_600_000) : 0,
+      hoursLimit: hours <= 0 ? null : hours,
+      champion: cp.champion,
+      history,
+    })
+  }
+
   console.log(
-    `train start gen=${cp.generation} sigma=${cp.sigma.toFixed(3)} games=${games} lambda=${lambda} hours=${hours}`,
+    `train start gen=${cp.generation} sigma=${cp.sigma.toFixed(3)} games=${games} lambda=${lambda} hours=${hours <= 0 ? "unlimited" : hours}`,
   )
+  publish("running")
 
   const save = () => {
     cp.updatedAt = new Date().toISOString()
@@ -133,14 +179,24 @@ function main() {
     writeJson(checkpointPath, cp)
   }
 
-  process.on("SIGINT", () => {
+  const shutdown = (state: "stopped" | "done") => {
     save()
+    publish(state)
+  }
+
+  process.on("SIGINT", () => {
+    shutdown("stopped")
     console.log("\nsaved", checkpointPath)
+    process.exit(0)
+  })
+  process.on("SIGTERM", () => {
+    shutdown("stopped")
     process.exit(0)
   })
 
   while (cp.generation < maxGen && Date.now() < deadline) {
     const gen = cp.generation + 1
+    publish("evaluating")
     const seeds = generationSeeds(gen, games, salt)
     const rng = makeRng((gen * 17 + salt) >>> 0)
     const champMargin = marginBetween(cp.champion, "taker", seeds)
@@ -180,16 +236,33 @@ function main() {
       }
     }
     save()
+    const event = improved ? "keep" : "stay"
+    if (improved) kept += 1
+    if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
+    history.push({
+      gen,
+      vsTaker: round(cp.vsTaker),
+      sigma: round(cp.sigma),
+      event,
+      at: new Date().toISOString(),
+    })
+    if (history.length > 240) history = history.slice(-240)
+    publish("running")
 
     if (improved || gen % 25 === 0) {
-      const elapsedH = (hours * 3600 * 1000 - (deadline - Date.now())) / 3600000
+      const elapsedH = (Date.now() - startedMs) / 3_600_000
       console.log(
         `gen ${gen}  vsTaker ${cp.vsTaker.toFixed(2)}  sigma ${cp.sigma.toFixed(3)}  ${improved ? "KEEP" : "stay"}  ${elapsedH.toFixed(2)}h`,
       )
     }
   }
 
+  shutdown("done")
   console.log("done", { generation: cp.generation, vsTaker: cp.vsTaker, weights: weightsPath })
+}
+
+function round(n: number): number | null {
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null
 }
 
 main()
