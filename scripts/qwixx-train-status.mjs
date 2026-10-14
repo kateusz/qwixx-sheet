@@ -1,7 +1,7 @@
 /**
- * Read-only panel for the training service. No pnpm, no extra packages.
+ * Local API for the public dashboard. Nginx on :80 is the only public listener.
  *   node scripts/qwixx-train-status.mjs
- * Start/stop buttons work only with the token from qwixx-trainctl.sh install.
+ * Start/stop work only with the token from qwixx-trainctl.sh install.
  */
 import { execFile } from "node:child_process"
 import fs from "node:fs"
@@ -11,7 +11,9 @@ import path from "node:path"
 const root = process.env.QWIXX_ROOT || path.resolve(import.meta.dirname, "..")
 const statusFile = process.env.QWIXX_STATUS_FILE || path.join(root, "training", "status.json")
 const tokenFile = process.env.QWIXX_TOKEN_FILE || path.join(root, "training", "panel.token")
+const dashboard = path.join(root, "deploy", "dashboard", "index.html")
 const port = Number(process.env.QWIXX_STATUS_PORT || 8787)
+const host = process.env.QWIXX_STATUS_HOST || "127.0.0.1"
 
 function readJson(file) {
   try {
@@ -26,8 +28,9 @@ function pidAlive(pid) {
   try {
     process.kill(pid, 0)
     return true
-  } catch {
-    return false
+  } catch (err) {
+    // EPERM: the pid exists, we just cannot signal it.
+    return err.code === "EPERM"
   }
 }
 
@@ -76,124 +79,64 @@ function snapshot() {
   return { ...(data || {}), state, pidAlive: alive, updatedAt: data?.updatedAt || null }
 }
 
-function page(snap, authed) {
-  const h = snap.history || []
-  const vals = h.map((e) => e.vsTaker).filter((n) => typeof n === "number")
-  const spark = sparkline(vals)
-  const rows = [...h].reverse().slice(0, 12)
-  const fmt = (n) => (typeof n === "number" ? n.toFixed(2) : "—")
-  const controls = authed
-    ? `<form method="post" action="/api/start"><button>Włącz</button></form>
-       <form method="post" action="/api/stop"><button class="stop">Wyłącz</button></form>`
-    : `<p class="hint">Podgląd. Sterowanie: <code>sudo qwixx-trainctl start</code> / <code>stop</code>, albo otwórz panel z tokenem z instalacji.</p>`
-  return `<!doctype html>
-<html lang="pl"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Trening Qwixx</title>
-<style>
-  :root { color-scheme: dark; }
-  body { margin: 0; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; background: #111; color: #eee; }
-  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: #999; margin: 0 0 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
-  .card { background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 12px; }
-  .k { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #2a2a2a; }
-  th { color: #999; font-size: 12px; }
-  .keep { color: #8fd18f; } .stay { color: #aaa; }
-  form { display: inline; }
-  button { margin: 12px 8px 0 0; background: #eee; color: #111; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
-  button.stop { background: #333; color: #eee; }
-  .hint, code { color: #aaa; }
-  svg { width: 100%; height: 72px; margin-top: 12px; }
-</style></head><body><main>
-<h1>Trening Qwixx</h1>
-<p class="sub">Odświeża się samo. Stan: <strong>${esc(snap.state)}</strong>${snap.pidAlive ? "" : ""}</p>
-<div class="grid">
-  ${stat("Pokolenie", snap.generation ?? "—")}
-  ${stat("vs taker", fmt(snap.vsTaker))}
-  ${stat("Najlepszy", fmt(snap.bestVsTaker))}
-  ${stat("Sigma", fmt(snap.sigma))}
-  ${stat("Bez poprawy", snap.stall ?? "—")}
-  ${stat("Zachowane", snap.kept ?? "—")}
-  ${stat("Gier / gen", snap.games ?? "—")}
-  ${stat("Gen / h", fmt(snap.gensPerHour))}
-</div>
-${spark}
-${controls}
-<table><thead><tr><th>Gen</th><th>vs taker</th><th>Sigma</th><th></th><th>Czas</th></tr></thead><tbody>
-${rows
-  .map(
-    (e) =>
-      `<tr><td>${e.gen}</td><td>${fmt(e.vsTaker)}</td><td>${fmt(e.sigma)}</td><td class="${e.event}">${e.event}</td><td>${esc((e.at || "").replace("T", " ").slice(0, 19))}</td></tr>`,
-  )
-  .join("")}
-</tbody></table>
-<p class="sub">Ostatnia aktualizacja: ${esc(snap.updatedAt || "nigdy")}</p>
-<script>
-setInterval(() => fetch("/api/status").then(r => r.json()).then(s => {
-  if (s.updatedAt !== ${JSON.stringify(snap.updatedAt || null)}) location.reload()
-}), 2000)
-</script>
-</main></body></html>`
+function sessionCookies() {
+  const value = encodeURIComponent(token())
+  return [
+    `qwixx_token=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`,
+    `qwixx_ui=1; SameSite=Lax; Path=/; Max-Age=2592000`,
+  ]
 }
 
-function stat(k, v) {
-  return `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`
-}
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
-}
-
-function sparkline(vals) {
-  if (vals.length < 2) return ""
-  const min = Math.min(...vals)
-  const max = Math.max(...vals)
-  const span = max - min || 1
-  const w = 600
-  const h = 72
-  const pts = vals
-    .map((v, i) => {
-      const x = (i / (vals.length - 1)) * w
-      const y = h - ((v - min) / span) * (h - 8) - 4
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(" ")
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline fill="none" stroke="#ddd" stroke-width="2" points="${pts}"/></svg>`
+function send(res, status, body, headers = {}) {
+  res.writeHead(status, headers)
+  res.end(body)
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://127.0.0.1")
-  if (url.pathname === "/api/status") {
-    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" })
-    res.end(JSON.stringify(snapshot()))
+
+  if (url.pathname === "/api/status" && req.method === "GET") {
+    send(res, 200, JSON.stringify(snapshot()), {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    })
     return
   }
+
+  if (url.pathname === "/api/session" && req.method === "GET") {
+    if (!authorized(req, url)) {
+      send(res, 403, "brak tokenu", { "content-type": "text/plain; charset=utf-8" })
+      return
+    }
+    send(res, 204, "", { "set-cookie": sessionCookies(), "cache-control": "no-store" })
+    return
+  }
+
   if ((url.pathname === "/api/start" || url.pathname === "/api/stop") && req.method === "POST") {
     if (!authorized(req, url)) {
-      res.writeHead(403, { "content-type": "text/plain; charset=utf-8" })
-      res.end("brak tokenu")
+      send(res, 403, "brak tokenu", { "content-type": "text/plain; charset=utf-8" })
       return
     }
     const cmd = url.pathname === "/api/start" ? "start" : "stop"
     const result = await systemctl([cmd, "qwixx-train"])
-    res.writeHead(303, { location: result.ok ? "/" : `/?err=${encodeURIComponent(result.out || "systemctl")}` })
-    res.end()
+    if (!result.ok) {
+      send(res, 502, result.out || "systemctl nie powiódł się", { "content-type": "text/plain; charset=utf-8" })
+      return
+    }
+    send(res, 204, "")
     return
   }
-  const authed = authorized(req, url)
-  const headers = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
-  if (authed && url.searchParams.get("token")) {
-    headers["set-cookie"] = `qwixx_token=${encodeURIComponent(token())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`
+
+  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+    const headers = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
+    if (authorized(req, url) && url.searchParams.get("token")) headers["set-cookie"] = sessionCookies()
+    send(res, 200, fs.readFileSync(dashboard), headers)
+    return
   }
-  res.writeHead(200, headers)
-  res.end(page(snapshot(), authed))
+
+  send(res, 404, "nie znaleziono", { "content-type": "text/plain; charset=utf-8" })
 })
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`qwixx train panel http://0.0.0.0:${port}`)
+server.listen(port, host, () => {
+  console.log(`qwixx train api http://${host}:${port}`)
 })

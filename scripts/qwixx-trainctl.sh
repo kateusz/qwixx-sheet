@@ -59,6 +59,31 @@ write_unit() {
   sed -e "s|__ROOT__|${ROOT}|g" -e "s|__USER__|${RUN_USER}|g" -e "s|__NODE__|${NODE_BIN}|g" "$src" > "$dest"
 }
 
+install_nginx() {
+  if ! command -v nginx >/dev/null 2>&1; then
+    if ! command -v apt-get >/dev/null 2>&1; then
+      echo "nginx is missing and apt-get is not available" >&2
+      exit 1
+    fi
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y nginx
+  fi
+  # ponytail: www-data must walk to the dashboard. Re-run install if the repo moves.
+  chmod a+rX "$ROOT/deploy" "$ROOT/deploy/dashboard" "$ROOT/deploy/dashboard/index.html"
+  local p="$ROOT"
+  while [[ "$p" != "/" ]]; do
+    chmod a+x "$p"
+    p="$(dirname "$p")"
+  done
+  sed -e "s|__ROOT__|${ROOT}|g" "$ROOT/deploy/nginx-qwixx-train.conf" > /etc/nginx/sites-available/qwixx-train
+  ln -sfn /etc/nginx/sites-available/qwixx-train /etc/nginx/sites-enabled/qwixx-train
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t
+  systemctl enable nginx
+  systemctl reload nginx || systemctl restart nginx
+}
+
 case "$cmd" in
   install)
     need_root install
@@ -77,22 +102,27 @@ case "$cmd" in
     fi
     write_unit "$ROOT/deploy/qwixx-train.service" /etc/systemd/system/qwixx-train.service
     write_unit "$ROOT/deploy/qwixx-train-status.service" /etc/systemd/system/qwixx-train-status.service
+    SYSCTL="$(command -v systemctl)"
     cat > /etc/sudoers.d/qwixx-train <<EOF
-${RUN_USER} ALL=(root) NOPASSWD: /bin/systemctl start qwixx-train, /bin/systemctl stop qwixx-train, /bin/systemctl restart qwixx-train
+${RUN_USER} ALL=(root) NOPASSWD: ${SYSCTL} start qwixx-train, ${SYSCTL} stop qwixx-train, ${SYSCTL} restart qwixx-train
 EOF
     chmod 440 /etc/sudoers.d/qwixx-train
     systemctl daemon-reload
-    systemctl enable --now qwixx-train-status.service
+    systemctl enable qwixx-train-status.service
+    systemctl restart qwixx-train-status.service
+    install_nginx
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-      ufw allow 8787/tcp
+      ufw delete allow 8787/tcp || true
+      ufw allow 80/tcp
     fi
     ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
     token="$(cat "$ROOT/training/panel.token")"
     echo
-    echo "Panel:  http://${ip:-TWOJ-IP}:8787/?token=${token}"
-    echo "Start:  systemctl start qwixx-train"
-    echo "Stop:   systemctl stop qwixx-train"
-    echo "Status: $0 status"
+    echo "Panel publiczny: http://${ip:-TWOJ-IP}/"
+    echo "Sterowanie:      http://${ip:-TWOJ-IP}/?token=${token}"
+    echo "Start:           systemctl start qwixx-train"
+    echo "Stop:            systemctl stop qwixx-train"
+    echo "Status:          $0 status"
     ;;
   start|stop|restart)
     need_root "$cmd"
