@@ -38,7 +38,7 @@ const BOUNDS: Partial<Record<keyof HeuristicWeights, [number, number]>> = {
   forcedMissWeight: [0, 10],
   deathDoorMissMultiplier: [1, 12],
   oppWeight: [0.4, 1.6],
-  passWhite: [-1, 6],
+  passWhite: [-4, 6],
   passColor: [-1, 6],
   continuationBonus: [0, 12],
   startRowBonus: [0, 10],
