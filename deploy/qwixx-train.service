@@ -11,7 +11,7 @@ WorkingDirectory=__ROOT__
 # In-process loader. The tsx CLI parent made systemd's main PID a process
 # that does not run the trainer, so a child crash left the unit failed.
 ExecStart=__NODE__ --import __ROOT__/node_modules/tsx/dist/loader.mjs __ROOT__/scripts/train-qwixx-ai.ts --hours 0 --games 32
-Restart=on-failure
+Restart=always
 RestartSec=5
 # Default OOMPolicy=stop can look like a clean stop and skip Restart=.
 OOMPolicy=kill

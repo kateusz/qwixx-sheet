@@ -112,7 +112,9 @@ async function main() {
   const hours = arg("hours", 168)
   const games = arg("games", 24)
   const lambda = arg("lambda", 6)
-  const maxGen = arg("generations", 1_000_000)
+  // --hours 0 promises "runs until stopped", so a generation cap must not end it.
+  // The old 1_000_000 default silently stopped the service after ~3 days.
+  const maxGen = arg("generations", hours <= 0 ? Number.POSITIVE_INFINITY : 1_000_000)
   const salt = arg("seed", 1)
   const startedMs = Date.now()
   const deadline = hours <= 0 ? Number.POSITIVE_INFINITY : startedMs + hours * 3600 * 1000
