@@ -1,149 +1,155 @@
-import { MAX_PENALTIES, MIN_MARKS_TO_LOCK, ROWS, pointsForMarks, rowMarkCount, type ColorKey } from "../qwixx"
-import {
-  atDeathDoor,
-  forcedMissPlanningPenalty,
-  investedRowUrgency,
-  scoreMoveHardRules,
-} from "./hardRules"
+import { MAX_PENALTIES, MIN_MARKS_TO_LOCK, PENALTY_VALUE, pointsForMarks, type ColorKey } from "../qwixx"
+import { bustRisk, scoreMoveHardRules } from "./hardRules"
 import type { EvalResult, GameState, Move, RowKey } from "./gameState"
+import tuned from "./tuned-weights.json"
 
 export interface HeuristicWeights {
   lockProgress: number
+  /** Extra quadratic penalty on miss count (the −5 is already in the score). */
   missExponent: number
+  /** Cost of each skipped cell, applied as weight × holes². */
   edgePenalty: number
   edgeRewardAfterFive: number
   blockOpponent: number
-  /** Hard rule: bonus for finishing focus rows (5–6 marks). */
   focusRowBonus: number
-  /** Hard rule: penalty for marginal marks in empty rows while focus rows exist. */
   marginalRowPenalty: number
-  /** Hard rule: red/yellow 6–8 flexibility bonus. */
   middleNumberBonus: number
-  /** Hard rule: seize lock when 5+ marks and last cell is legal. */
   lockNowBonus: number
-  /** Hard rule: urgency when opponent may lock a row we invested in. */
   investedRowUrgency: number
-  /** Hard rule: weight for P(forced miss) in evaluation. */
   forcedMissWeight: number
-  /** Multiplier on forced-miss cost at 3 penalties (next ends game). */
   deathDoorMissMultiplier: number
+  oppWeight: number
+  /** White skip beats a mark unless the mark scores higher than this. */
+  passWhite: number
+  passColor: number
+  continuationBonus: number
+  startRowBonus: number
+  strandedPenalty: number
+  almostLock: number
+  /** Second lock while behind ends the game — don't do it. */
+  endWhileBehind: number
 }
 
 export const DEFAULT_WEIGHTS: HeuristicWeights = {
-  lockProgress: 4.5,
+  lockProgress: 4,
   missExponent: 2.2,
-  edgePenalty: 2.5,
-  edgeRewardAfterFive: 1.5,
-  blockOpponent: 3,
-  focusRowBonus: 10,
-  marginalRowPenalty: 14,
-  middleNumberBonus: 12,
-  lockNowBonus: 22,
-  investedRowUrgency: 5,
-  forcedMissWeight: 4,
-  deathDoorMissMultiplier: 8,
+  edgePenalty: 0.9,
+  edgeRewardAfterFive: 1.4,
+  blockOpponent: 2,
+  focusRowBonus: 3,
+  marginalRowPenalty: 5,
+  middleNumberBonus: 2.2,
+  lockNowBonus: 4,
+  investedRowUrgency: 2,
+  forcedMissWeight: 1.5,
+  deathDoorMissMultiplier: 3,
+  oppWeight: 1,
+  passWhite: 0.6,
+  passColor: 0.4,
+  continuationBonus: 2.2,
+  startRowBonus: 1.5,
+  strandedPenalty: 14,
+  almostLock: 3.5,
+  endWhileBehind: 16,
 }
 
 const COLORS: RowKey[] = ["red", "yellow", "green", "blue"]
+const ROW_LEN = 11
 
-function rowLen(color: RowKey): number {
-  return ROWS.find((r) => r.key === color)!.numbers.length
+export function activeWeights(): HeuristicWeights {
+  return { ...DEFAULT_WEIGHTS, ...(tuned as Partial<HeuristicWeights>) }
 }
 
-function cumulativeRowScore(state: GameState): number {
-  return COLORS.reduce((sum, c) => sum + pointsForMarks(rowMarkCount(state.self.rows[c] as never)), 0)
+export interface SheetLike {
+  rows: Record<RowKey, { marks: number[]; locked: boolean }>
+  penalties: number
 }
 
-/** Bonus for being close to locking (5+ marks, near row end 2/12). */
-function lockProgressBonus(state: GameState, w: HeuristicWeights): number {
-  let bonus = 0
+function sheetPoints(sheet: SheetLike): number {
+  let n = 0
   for (const c of COLORS) {
-    const row = state.self.rows[c]
+    const row = sheet.rows[c]
+    n += pointsForMarks(row.marks.length + (row.locked ? 1 : 0))
+  }
+  return n - sheet.penalties * PENALTY_VALUE
+}
+
+function locksOf(sheet: SheetLike): number {
+  let n = 0
+  for (const c of COLORS) if (sheet.rows[c].locked) n++
+  return n
+}
+
+function isTerminal(me: SheetLike, opp: SheetLike): boolean {
+  return me.penalties >= MAX_PENALTIES || opp.penalties >= MAX_PENALTIES || locksOf(me) >= 2 || locksOf(opp) >= 2
+}
+
+/** Higher is better for `me`. Terminal positions use the real score only. */
+export function evaluatePlayers(me: SheetLike, opp: SheetLike, w: HeuristicWeights = DEFAULT_WEIGHTS): number {
+  const myPts = sheetPoints(me)
+  const oppPts = sheetPoints(opp)
+  let score = myPts - w.oppWeight * oppPts
+
+  if (isTerminal(me, opp)) {
+    if (me.penalties >= MAX_PENALTIES) score -= 40
+    if (opp.penalties >= MAX_PENALTIES) score += 40
+    if (locksOf(me) >= 2 && myPts + 8 < oppPts) score -= w.endWhileBehind
+    return score
+  }
+
+  if (me.penalties > 0) score -= w.missExponent * me.penalties * me.penalties
+
+  for (const c of COLORS) {
+    const row = me.rows[c]
+    const count = row.marks.length
+    const high = count ? Math.max(...row.marks) : -1
     if (row.locked) {
-      bonus += 6
+      score += w.lockProgress
       continue
     }
-    const marks = row.marks.length
-    if (marks < MIN_MARKS_TO_LOCK) continue
-    const len = rowLen(c)
-    const high = marks ? Math.max(...row.marks) : -1
-    const distToLock = len - 1 - high
-    bonus += w.lockProgress * (1 + (MIN_MARKS_TO_LOCK - Math.max(0, distToLock)) / MIN_MARKS_TO_LOCK)
-  }
-  return bonus
-}
+    if (count > 0) {
+      // Cells to the left of the rightmost cross can never be marked.
+      const holes = high + 1 - count
+      score -= w.edgePenalty * holes * holes
+      const remaining = Math.max(0, ROW_LEN - 2 - high)
+      if (count + remaining < MIN_MARKS_TO_LOCK) score -= w.strandedPenalty
+      if (count === 4) score += w.almostLock
+      if (count >= MIN_MARKS_TO_LOCK) {
+        score += w.edgeRewardAfterFive * (count - 4)
+        score += w.lockProgress / (1 + Math.max(0, ROW_LEN - 2 - high))
+      }
+    }
 
-/** Grows quickly as misses approach 4 (−5 each at scoring time). */
-function missPenalty(state: GameState, w: HeuristicWeights): number {
-  const m = state.missCount
-  if (m <= 0) return 0
-  return w.missExponent ** m * 4
-}
-
-/**
- * Penalize marking near the open edge early; reward edge marks once 5+ exist
- * (flexibility to reach distant numbers later).
- */
-function flexibilityTerm(state: GameState, w: HeuristicWeights): number {
-  let term = 0
-  for (const c of COLORS) {
-    const row = state.self.rows[c]
-    if (row.locked || row.marks.length === 0) continue
-    const len = rowLen(c)
-    const high = Math.max(...row.marks)
-    const low = Math.min(...row.marks)
-    const span = high - low
-    if (row.marks.length < MIN_MARKS_TO_LOCK) {
-      term -= w.edgePenalty * (len - 1 - high) * 0.15
-      term -= w.edgePenalty * low * 0.08
-    } else {
-      term += w.edgeRewardAfterFive * span * 0.2
+    const oppRow = opp.rows[c]
+    if (!oppRow.locked && oppRow.marks.length >= MIN_MARKS_TO_LOCK && count > 0) {
+      const oppHigh = Math.max(...oppRow.marks)
+      const dist = Math.max(1, ROW_LEN - 2 - oppHigh)
+      const pressure = MIN_MARKS_TO_LOCK / dist
+      score += w.investedRowUrgency * (1 + count * 0.25) * pressure
+      score += w.blockOpponent * pressure
     }
   }
-  return term
-}
 
-/** Increase value of rows where opponent is close to locking (legacy term). */
-function blockOpponentTerm(state: GameState, w: HeuristicWeights): number {
-  let term = 0
-  for (const c of COLORS) {
-    const opp = state.opponentProgress[c]
-    if (opp.locked) continue
-    if (opp.markCount >= MIN_MARKS_TO_LOCK) {
-      const len = rowLen(c)
-      const dist = len - 1 - opp.highWater
-      term += w.blockOpponent * (MIN_MARKS_TO_LOCK / Math.max(1, dist))
-    }
-  }
-  return term
+  const bust = bustRisk(me) * (me.penalties >= 3 ? w.deathDoorMissMultiplier : 1)
+  score -= w.forcedMissWeight * bust
+  return score
 }
 
 export function evaluateState(state: GameState, weights: HeuristicWeights = DEFAULT_WEIGHTS): EvalResult {
-  const rowScore = cumulativeRowScore(state) - state.missCount * 5
-  const lockBonus = lockProgressBonus(state, weights)
-  const missPen = missPenalty(state, weights)
-  const flexibility = flexibilityTerm(state, weights)
-  const blockOpponent = blockOpponentTerm(state, weights)
-  const investedUrgency = investedRowUrgency(state, weights)
-  const forcedMiss = forcedMissPlanningPenalty(state, weights)
-  const deathDoor =
-    atDeathDoor(state) && state.selfIsActive ? (MAX_PENALTIES - state.missCount) * -15 : 0
-  const hardRules = investedUrgency - forcedMiss + deathDoor
-  const score = rowScore + lockBonus - missPen + flexibility + blockOpponent + hardRules
+  const score = evaluatePlayers(state.self, state.opponent, weights)
   return {
     score,
     breakdown: {
-      rowScore,
-      lockBonus,
-      missPenalty: missPen,
-      flexibility,
-      blockOpponent,
-      hardRules,
+      rowScore: score,
+      lockBonus: 0,
+      missPenalty: 0,
+      flexibility: 0,
+      blockOpponent: 0,
+      hardRules: 0,
     },
   }
 }
 
-/** Leaf + move scoring: base eval delta plus hard-rule move adjustments. */
 export function evaluateMove(
   state: GameState,
   move: Move,
@@ -155,7 +161,6 @@ export function evaluateMove(
   return move.kind === "mark" ? delta + scoreMoveHardRules(state, move, weights) : delta
 }
 
-/** Perspective flip for simulating opponent ply. */
 export function swapPerspective(state: GameState): GameState {
   return {
     ...state,
