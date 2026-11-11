@@ -39,13 +39,55 @@ function applyLocal(p: PlayerState, color: ColorKey, index: number): PlayerState
   }
 }
 
-/** One-ply pick. Null means skip. */
-export function fastPick(
+export interface ScoredMove {
+  move: ClassicMove | null
+  score: number
+  reasons: string[]
+}
+
+export interface AiDecision {
+  kind: "white" | "color"
+  player: ClassicPlayerId
+  choice: ClassicMove | null
+  score: number
+  skipScore: number
+  reasons: string[]
+  alternatives: ScoredMove[]
+  forced: boolean
+}
+
+function markReasons(
+  me: PlayerState,
+  move: ClassicMove,
+  delta: number,
+  shape: number,
+  w: HeuristicWeights,
+): string[] {
+  const row = me.rows[move.color]
+  const high = row.marks.length ? Math.max(...row.marks) : -1
+  const gap = move.index - high - 1
+  const out: string[] = []
+  if (row.marks.length > 0 && gap === 0) out.push("kontynuacja rzędu (bez dziury)")
+  if (row.marks.length === 0 && move.index <= 1) out.push("bezpieczny start rzędu")
+  if ((move.color === "red" || move.color === "yellow") && move.number >= 6 && move.number <= 8 && gap <= 1) {
+    out.push("elastyczny środek 6–8")
+  }
+  if (move.index === 10 && row.marks.length >= 5) out.push("bierze kłódkę (+1 i zdejmuje kość)")
+  if (gap >= 2) out.push(`skok o ${gap} pól`)
+  if (shape > 0.5) out.push("kształt rzędu wygląda dobrze")
+  if (shape < -0.5) out.push("ryzyko pobocznego / słabego rzędu")
+  if (delta > 2) out.push("duży skok w ocenie pozycji")
+  if (delta < 0) out.push("krótkotrwały spadek oceny, ale reguły twarde to ratują")
+  if (!out.length) out.push(delta >= w.passWhite ? "lepsze niż pominięcie" : "słabe względem pominięcia")
+  return out
+}
+
+function scoreOptions(
   state: ClassicGameState,
   player: ClassicPlayerId,
   kind: "white" | "color",
-  weights: HeuristicWeights = activeWeights(),
-): ClassicMove | null {
+  weights: HeuristicWeights,
+): { skipVal: number; scored: ScoredMove[]; alreadyPlaced: boolean; me: PlayerState } {
   const moves = kind === "white" ? getWhiteSumMoves(state, player) : getColorMoves(state, player)
   const me = playerRef(state, player)
   const opp = playerRef(state, player === "ai" ? "human" : "ai")
@@ -59,22 +101,70 @@ export function fastPick(
       : evaluatePlayers({ ...me, penalties: me.penalties + 1 }, opp, weights) - base
   }
 
-  let bestMark: ClassicMove | null = null
-  let bestVal = -Infinity
-  for (const m of moves) {
+  const scored: ScoredMove[] = moves.map((m) => {
     const next = applyLocal(me, m.color, m.index)
-    if (!next) continue
-    const v = evaluatePlayers(next, opp, weights) - base + shapeMark(me, m.color, m.index, m.number, weights)
-    if (v > bestVal) {
-      bestVal = v
-      bestMark = m
-    }
+    if (!next) return { move: m, score: -Infinity, reasons: ["niedozwolone"] }
+    const shape = shapeMark(me, m.color, m.index, m.number, weights)
+    const delta = evaluatePlayers(next, opp, weights) - base
+    const score = delta + shape
+    return { move: m, score, reasons: markReasons(me, m, delta, shape, weights) }
+  })
+  scored.sort((a, b) => b.score - a.score)
+  return { skipVal, scored, alreadyPlaced, me }
+}
+
+/** One-ply pick. Null means skip. */
+export function fastPick(
+  state: ClassicGameState,
+  player: ClassicPlayerId,
+  kind: "white" | "color",
+  weights: HeuristicWeights = activeWeights(),
+): ClassicMove | null {
+  return explainPick(state, player, kind, weights).choice
+}
+
+/** Same pick as fastPick, plus Polish reasons for the UI. */
+export function explainPick(
+  state: ClassicGameState,
+  player: ClassicPlayerId,
+  kind: "white" | "color",
+  weights: HeuristicWeights = activeWeights(),
+): AiDecision {
+  const { skipVal, scored, alreadyPlaced, me } = scoreOptions(state, player, kind, weights)
+  const best = scored[0]
+  const forced = kind === "color" && me.penalties >= 3 && !alreadyPlaced && !!best
+  let choice: ClassicMove | null = null
+  let score = skipVal
+  let reasons: string[] = []
+
+  if (forced && best) {
+    choice = best.move
+    score = best.score
+    reasons = ["3 pudła — lepiej cokolwiek niż kończąca kara", ...best.reasons]
+  } else if (best && best.score > skipVal) {
+    choice = best.move
+    score = best.score
+    reasons = best.reasons
+  } else {
+    reasons =
+      kind === "white"
+        ? ["pominięcie białych: żaden ruch nie bije progu passWhite"]
+        : alreadyPlaced
+          ? ["już jest krzyżyk w tej turze — kolor nie jest wart ryzyka"]
+          : ["kara −5 jest tańsza niż te ruchy (albo brak legalnych)"]
+    if (best) reasons.push(`najlepsza opcja miała ocenę ${best.score.toFixed(1)} vs próg ${skipVal.toFixed(1)}`)
   }
 
-  // Active player on 3 misses: any color mark beats the game-ending 4th penalty.
-  if (kind === "color" && me.penalties >= 3 && !alreadyPlaced && bestMark) return bestMark
-  if (bestMark && bestVal > skipVal) return bestMark
-  return null
+  return {
+    kind,
+    player,
+    choice,
+    score,
+    skipScore: skipVal,
+    reasons,
+    alternatives: [{ move: null, score: skipVal, reasons: ["pomiń"] }, ...scored.slice(0, 4)],
+    forced,
+  }
 }
 
 function die(rng: () => number): number {

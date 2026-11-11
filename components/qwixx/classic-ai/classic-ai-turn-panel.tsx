@@ -50,7 +50,7 @@ export function ClassicAiTurnPanel({
     <div className="mb-4 space-y-3 rounded-2xl border border-border bg-card p-4">
       <div>
         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Dice</p>
-        <DiceFaces values={rollDisplay.values} compact />
+        <DiceFaces values={rollDisplay.values} size="sm" />
       </div>
 
       {phase === "whiteHuman" && (

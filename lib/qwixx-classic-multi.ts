@@ -93,6 +93,15 @@ function checkEnd(state: ClassicGameState): ClassicGameState {
   }
 }
 
+/** Official rule: locking a row removes that color die for everyone. */
+export function isColorRemoved(state: ClassicGameState, color: ColorKey): boolean {
+  return state.human.rows[color].locked || state.ai.rows[color].locked
+}
+
+export function removedColors(state: ClassicGameState): ColorKey[] {
+  return (["red", "yellow", "green", "blue"] as const).filter((c) => isColorRemoved(state, c))
+}
+
 /** Legal white-sum marks for a player on the current roll. */
 export function getWhiteSumMoves(state: ClassicGameState, player: ClassicPlayerId): ClassicMove[] {
   if (!state.roll) return []
@@ -102,6 +111,7 @@ export function getWhiteSumMoves(state: ClassicGameState, player: ClassicPlayerI
   const p = playerRef(state, player)
   const out: ClassicMove[] = []
   for (const config of ROWS) {
+    if (isColorRemoved(state, config.key)) continue
     const idx = indexForNumber(config.key, sum)
     if (idx === null) continue
     const len = rowLength(config.key)
@@ -125,6 +135,7 @@ export function getColorMoves(state: ClassicGameState, player: ClassicPlayerId):
   const p = playerRef(state, player)
   const out: ClassicMove[] = []
   for (const [color, dieVal] of colorDice) {
+    if (isColorRemoved(state, color)) continue
     for (const w of [w1, w2]) {
       const sum = w + dieVal
       const idx = indexForNumber(color, sum)
@@ -309,4 +320,13 @@ if (typeof process !== "undefined" && process.argv[1]?.endsWith("qwixx-classic-m
   s = { ...s, phase: "colorHuman", turnPlaced: true }
   const colorMoves = getColorMoves(s, "human")
   console.assert(colorMoves.length > 0, "color moves exist")
+
+  // Opponent lock removes the color for everyone (white sum and color combo).
+  s = createClassicVsAi()
+  s.ai.rows.red = { marks: [0, 1, 2, 3, 4, 10], locked: true }
+  s = rollDice(s, [6, 6, 6, 1, 1, 1])
+  console.assert(!getWhiteSumMoves(s, "human").some((m) => m.color === "red"), "no white mark on AI-locked red")
+  s = { ...s, phase: "colorHuman", active: "human" }
+  console.assert(!getColorMoves(s, "human").some((m) => m.color === "red"), "no color mark on AI-locked red")
+  console.assert(isColorRemoved(s, "red"), "red die removed")
 }

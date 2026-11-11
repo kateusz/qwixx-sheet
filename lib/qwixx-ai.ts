@@ -1,6 +1,7 @@
 import {
   type ClassicGameState,
   type ClassicMove,
+  type ClassicPlayerId,
   applyMark,
   afterColorAi,
   afterWhiteAi,
@@ -9,10 +10,11 @@ import {
   randomRollValues,
   rollDice,
 } from "./qwixx-classic-multi"
-import { fastLookaheadPick, fastPick } from "./qwixx-ai/fastPolicy"
+import { explainPick, fastLookaheadPick, fastPick, type AiDecision } from "./qwixx-ai/fastPolicy"
 import { activeWeights } from "./qwixx-ai/heuristics"
 
 export type AiDifficulty = "easy" | "normal" | "hard"
+export type { AiDecision }
 
 function easyPick(state: ClassicGameState, kind: "white" | "color"): ClassicMove | null {
   const moves = kind === "white" ? getWhiteSumMoves(state, "ai") : getColorMoves(state, "ai")
@@ -37,18 +39,77 @@ export function aiPickColor(state: ClassicGameState, difficulty: AiDifficulty): 
   return fastPick(state, "ai", "color", w)
 }
 
-export function runAiWhiteSum(state: ClassicGameState, difficulty: AiDifficulty): ClassicGameState {
-  let next = state
-  const move = aiPickWhiteSum(next, difficulty)
-  if (move) next = applyMark(next, "ai", move.color, move.index) ?? next
-  return afterWhiteAi(next)
+/** Decision + reasons. Hard may override the 1-ply choice with lookahead. */
+export function explainAiMove(
+  state: ClassicGameState,
+  kind: "white" | "color",
+  difficulty: AiDifficulty,
+  player: ClassicPlayerId = "ai",
+): AiDecision {
+  const w = activeWeights()
+  const decision = explainPick(state, player, kind, w)
+  if (difficulty === "easy") {
+    return {
+      ...decision,
+      reasons: ["easy miesza z losowością; poniżej ocena normal", ...decision.reasons],
+    }
+  }
+  if (difficulty === "hard") {
+    const hard = fastLookaheadPick(state, player, kind, w, 3)
+    const same = hard?.color === decision.choice?.color && hard?.index === decision.choice?.index
+    if (same) {
+      return { ...decision, reasons: ["hard: zgodne z lookaheadem", ...decision.reasons] }
+    }
+    return {
+      ...decision,
+      choice: hard,
+      reasons: [
+        hard ? `hard: lookahead wybrał ${hard.color} ${hard.number}` : "hard: lookahead woli pominąć",
+        ...decision.reasons,
+      ],
+    }
+  }
+  return decision
 }
 
-export function runAiColor(state: ClassicGameState, difficulty: AiDifficulty): ClassicGameState {
+export function runAiWhiteSum(
+  state: ClassicGameState,
+  difficulty: AiDifficulty,
+): { state: ClassicGameState; decision: AiDecision } {
+  let decision = explainAiMove(state, "white", difficulty, "ai")
   let next = state
-  const move = aiPickColor(next, difficulty)
-  if (move) next = applyMark(next, "ai", move.color, move.index) ?? next
-  return afterColorAi(next)
+  const picked = difficulty === "easy" ? easyPick(state, "white") : decision.choice
+  if (difficulty === "easy") {
+    decision = {
+      ...decision,
+      choice: picked,
+      reasons: picked
+        ? [`easy zagrało ${picked.color} ${picked.number}`, ...decision.reasons]
+        : ["easy pominęło białe", ...decision.reasons],
+    }
+  }
+  if (picked) next = applyMark(next, "ai", picked.color, picked.index) ?? next
+  return { state: afterWhiteAi(next), decision }
+}
+
+export function runAiColor(
+  state: ClassicGameState,
+  difficulty: AiDifficulty,
+): { state: ClassicGameState; decision: AiDecision } {
+  let decision = explainAiMove(state, "color", difficulty, "ai")
+  let next = state
+  const picked = difficulty === "easy" ? easyPick(state, "color") : decision.choice
+  if (difficulty === "easy") {
+    decision = {
+      ...decision,
+      choice: picked,
+      reasons: picked
+        ? [`easy zagrało ${picked.color} ${picked.number}`, ...decision.reasons]
+        : ["easy pominęło kolor / wzięło karę", ...decision.reasons],
+    }
+  }
+  if (picked) next = applyMark(next, "ai", picked.color, picked.index) ?? next
+  return { state: afterColorAi(next), decision }
 }
 
 export function runAiRoll(state: ClassicGameState): ClassicGameState {

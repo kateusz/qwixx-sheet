@@ -133,7 +133,8 @@ async function main() {
   let history: {
     gen: number
     vsTaker: number | null
-    sigma: number
+    deltaVsPrev?: number | null
+    sigma: number | null
     event: string
     at: string
     avgScoreWins?: number | null
@@ -284,9 +285,12 @@ async function main() {
       if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
       // Score by outcome on this generation's seeds (policy that owns vsTaker).
       const sheet = improved ? matchupStats(best, "taker", seeds) : champSheet
+      const prevVs = history.length ? history[history.length - 1]!.vsTaker : null
       history.push({
         gen,
         vsTaker: round(cp.vsTaker),
+        deltaVsPrev:
+          typeof prevVs === "number" && Number.isFinite(cp.vsTaker) ? round(cp.vsTaker - prevVs) : null,
         sigma: round(cp.sigma),
         event,
         at: new Date().toISOString(),

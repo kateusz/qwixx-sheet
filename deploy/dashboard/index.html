@@ -50,7 +50,7 @@
   .dot.wait { background: var(--amber); }
   .dot.off { background: var(--bad); }
   @keyframes pulse { 50% { box-shadow: 0 0 0 7px rgba(125, 206, 160, 0); } }
-  .hero { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 12px; }
+  .hero { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr; gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
   .k { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   .hero .v {
@@ -66,6 +66,7 @@
   .chart-wrap { margin-top: 12px; }
   .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   svg.chart { width: 100%; height: 240px; display: block; margin-top: 8px; }
+  svg.deltas { width: 100%; height: 120px; display: block; margin-top: 10px; }
   .cols { display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 12px; margin-top: 12px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th { text-align: left; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 6px; }
@@ -86,6 +87,9 @@
   .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
   .empty { color: var(--muted); padding: 28px 0; }
   footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 1000px) {
+    .hero { grid-template-columns: 1fr 1fr 1fr; }
+  }
   @media (max-width: 800px) {
     .hero, .metrics { grid-template-columns: 1fr 1fr; }
     .cols { grid-template-columns: 1fr; }
@@ -107,6 +111,11 @@
       <div class="v" id="margin">—</div>
       <div class="subv" id="delta">czekam na dane</div>
     </article>
+    <article class="card">
+      <div class="k">Przyrost</div>
+      <div class="v" id="step" style="font-size:34px">—</div>
+      <div class="subv" id="stepMeta">vs poprzednie pokolenie</div>
+    </article>
     <article class="card"><div class="k">Najlepszy</div><div class="v" id="best" style="font-size:34px">—</div><div class="subv" id="kept">—</div></article>
     <article class="card"><div class="k">Pokolenie</div><div class="v" id="gen" style="font-size:34px">—</div><div class="subv" id="stall">—</div></article>
     <article class="card"><div class="k">Tempo</div><div class="v" id="rate" style="font-size:34px">—</div><div class="subv" id="games">—</div></article>
@@ -117,6 +126,11 @@
       <div class="subv" id="chartMeta"></div>
     </div>
     <div id="chart"></div>
+    <div class="chart-head" style="margin-top:14px">
+      <div class="k">Przyrost pokolenie → pokolenie</div>
+      <div class="subv" id="deltaMeta"></div>
+    </div>
+    <div id="deltaChart"></div>
   </section>
   <section class="metrics">
     <article class="card"><div class="k">Sigma</div><div class="v" id="sigma">—</div></article>
@@ -128,7 +142,7 @@
     <article class="card">
       <div class="k">Ostatnie pokolenia</div>
       <table>
-        <thead><tr><th>Gen</th><th>vs taker</th><th>Pkt W</th><th>Pkt L</th><th></th><th>Czas</th></tr></thead>
+        <thead><tr><th>Gen</th><th>vs taker</th><th>Δ</th><th>Pkt W</th><th>Pkt L</th><th></th><th>Czas</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </article>
@@ -191,11 +205,21 @@ function when(iso) {
   return iso.replace("T", " ").slice(0, 19)
 }
 
-function chart(history) {
+function withDeltas(history) {
   const pts = (history || []).filter((e) => num(e.vsTaker))
+  return pts.map((e, i) => ({
+    ...e,
+    delta: num(e.deltaVsPrev) ? e.deltaVsPrev : i === 0 ? null : e.vsTaker - pts[i - 1].vsTaker,
+  }))
+}
+
+function chart(history) {
+  const pts = withDeltas(history)
   if (pts.length < 2) {
     el("chart").innerHTML = `<div class="empty">Wykres pojawi się po dwóch pokoleniach.</div>`
     el("chartMeta").textContent = ""
+    el("deltaChart").innerHTML = `<div class="empty">Przyrosty pojawią się po dwóch pokoleniach.</div>`
+    el("deltaMeta").textContent = ""
     return
   }
   const w = 800, h = 220, l = 44, r = 12, t = 16, b = 28
@@ -218,7 +242,35 @@ function chart(history) {
     ${keeps}
   </svg>`
   const d = vals[vals.length - 1] - vals[0]
-  el("chartMeta").textContent = `${pts.length} punktów · od początku ${signed(d)} · kropki to zapisane wagi`
+  const step = vals[vals.length - 1] - vals[vals.length - 2]
+  el("chartMeta").textContent = `${pts.length} punktów · od początku ${signed(d)} · ostatni krok ${signed(step)} · kropki = zapis`
+
+  const deltas = pts.slice(1).map((p) => p.delta)
+  const dMin = Math.min(...deltas, 0)
+  const dMax = Math.max(...deltas, 0)
+  const dSpan = dMax - dMin || 1
+  const dh = 110, dt = 10, db = 18
+  const dy = (v) => dt + (1 - (v - dMin) / dSpan) * (dh - dt - db)
+  const zero = dy(0)
+  const barW = Math.max(2, ((w - l - r) / Math.max(deltas.length, 1)) * 0.72)
+  const bars = deltas.map((v, i) => {
+    const cx = x(i + 1)
+    const y1 = dy(v)
+    const top = Math.min(y1, zero)
+    const height = Math.max(1.5, Math.abs(y1 - zero))
+    const fill = v > 0.05 ? "#7dcea0" : v < -0.05 ? "#e07a7a" : "#5a6478"
+    return `<rect x="${(cx - barW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" fill="${fill}" rx="1.5"/>`
+  }).join("")
+  el("deltaChart").innerHTML = `<svg class="deltas" viewBox="0 0 ${w} ${dh}" role="img" aria-label="Przyrost między pokoleniami">
+    <line x1="${l}" y1="${zero.toFixed(1)}" x2="${w - r}" y2="${zero.toFixed(1)}" stroke="#2a3140"/>
+    <text x="0" y="${dy(dMax) + 4}" fill="#8b93a7" font-size="11">${dMax.toFixed(1)}</text>
+    <text x="0" y="${dy(dMin) + 4}" fill="#8b93a7" font-size="11">${dMin.toFixed(1)}</text>
+    ${bars}
+  </svg>`
+  const up = deltas.filter((v) => v > 0.05).length
+  const down = deltas.filter((v) => v < -0.05).length
+  const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length
+  el("deltaMeta").textContent = `średni krok ${signed(avg)} · ↑${up} ↓${down} · zieleń = wzrost vs poprzednie`
 }
 
 function render(s) {
@@ -228,8 +280,24 @@ function render(s) {
   const m = el("margin")
   m.textContent = num(s.vsTaker) ? signed(s.vsTaker) : "—"
   m.className = "v " + (num(s.vsTaker) ? cls(s.vsTaker) : "")
-  const hist = (s.history || []).filter((e) => num(e.vsTaker))
+  const hist = withDeltas(s.history || [])
   el("delta").textContent = hist.length > 1 ? `od pierwszego punktu ${signed(hist[hist.length - 1].vsTaker - hist[0].vsTaker)}` : "jeszcze bez historii"
+  const last = hist[hist.length - 1]
+  const stepEl = el("step")
+  if (last && num(last.delta)) {
+    stepEl.textContent = signed(last.delta)
+    stepEl.className = "v " + cls(last.delta)
+    const keeps = hist.filter((e) => e.event === "keep")
+    const keepDelta =
+      keeps.length >= 2 ? keeps[keeps.length - 1].vsTaker - keeps[keeps.length - 2].vsTaker : null
+    el("stepMeta").textContent = num(keepDelta)
+      ? `vs poprzednie · ostatni zapis ${signed(keepDelta)}`
+      : "vs poprzednie pokolenie"
+  } else {
+    stepEl.textContent = "—"
+    stepEl.className = "v"
+    el("stepMeta").textContent = "vs poprzednie pokolenie"
+  }
   el("best").textContent = num(s.bestVsTaker) ? signed(s.bestVsTaker) : "—"
   el("best").className = "v " + (num(s.bestVsTaker) ? cls(s.bestVsTaker) : "")
   el("kept").textContent = `${s.kept ?? 0} zapisanych zestawów`
@@ -242,15 +310,16 @@ function render(s) {
   el("keptN").textContent = s.kept ?? "—"
   el("gamesN").textContent = s.games ?? "—"
   chart(s.history)
-  const rows = [...(s.history || [])].reverse().slice(0, 14)
+  const rows = [...hist].reverse().slice(0, 18)
   el("rows").innerHTML = rows.map((e) => `<tr>
     <td>${e.gen}</td>
     <td class="${num(e.vsTaker) ? cls(e.vsTaker) : ""}">${num(e.vsTaker) ? signed(e.vsTaker) : "—"}</td>
+    <td class="${num(e.delta) ? cls(e.delta) : ""}">${num(e.delta) ? signed(e.delta) : "—"}</td>
     <td>${num(e.avgScoreWins) ? e.avgScoreWins.toFixed(1) : "—"}</td>
     <td>${num(e.avgScoreLosses) ? e.avgScoreLosses.toFixed(1) : "—"}</td>
     <td><span class="tag ${e.event === "keep" ? "keep" : "stay"}">${e.event === "keep" ? "zapis" : "zostaw"}</span></td>
     <td>${(e.at || "").replace("T", " ").slice(11, 19)}</td>
-  </tr>`).join("") || `<tr><td colspan="6" class="empty">Brak pokoleń</td></tr>`
+  </tr>`).join("") || `<tr><td colspan="7" class="empty">Brak pokoleń</td></tr>`
   const champ = s.champion || {}
   el("weights").innerHTML = Object.keys(champ).map((k) => `<div class="wrow"><span>${LABELS[k] || k}</span><b>${Number(champ[k]).toFixed(2)}</b></div>`).join("") || `<div class="empty">Brak wag</div>`
   const errLine = s.lastError ? ` · błąd: ${String(s.lastError).split("\n")[0]}` : ""
