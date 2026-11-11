@@ -7,19 +7,27 @@ import {
   applyMark,
   createClassicVsAi,
   endColorHuman,
+  isColorRemoved,
   isValidMove,
   rollDice,
   skipWhiteHuman,
   unmarkCell,
   type ClassicGameState,
 } from "@/lib/qwixx-classic-multi"
-import { runAiColor, runAiRoll, runAiWhiteSum, type AiDifficulty } from "@/lib/qwixx-ai"
+import {
+  explainAiMove,
+  runAiColor,
+  runAiRoll,
+  runAiWhiteSum,
+  type AiDifficulty,
+} from "@/lib/qwixx-ai"
 import { sfx } from "@/lib/sound"
 import { ScoreRow } from "../score-row"
 import { VersionNav } from "../version-nav"
 import { ClassicAiTurnPanel } from "./classic-ai-turn-panel"
 import { ClassicAiEndModal } from "./classic-ai-end-modal"
 import { ClassicAiSettingsDialog } from "./classic-ai-settings-dialog"
+import { ClassicAiDebugPanel, type AiLogEntry } from "./classic-ai-debug-panel"
 
 const STATE_KEY = "qwixx-classic-ai-v1"
 const THEME_KEY = "qwixx-theme"
@@ -34,6 +42,9 @@ export function QwixxClassicAiGame() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [aiThinking, setAiThinking] = useState(false)
+  const [aiLog, setAiLog] = useState<AiLogEntry[]>([])
+  const [hint, setHint] = useState<AiLogEntry | null>(null)
+  const logId = useRef(0)
 
   const mutedRef = useRef(muted)
   mutedRef.current = muted
@@ -45,6 +56,18 @@ export function QwixxClassicAiGame() {
   stateRef.current = state
   const difficultyRef = useRef(difficulty)
   difficultyRef.current = difficulty
+
+  function pushLog(phase: "white" | "color", decision: AiLogEntry["decision"]) {
+    logId.current += 1
+    const entry: AiLogEntry = {
+      id: logId.current,
+      at: new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      phase,
+      who: "AI",
+      decision,
+    }
+    setAiLog((prev) => [...prev.slice(-40), entry])
+  }
 
   useEffect(() => {
     try {
@@ -102,6 +125,10 @@ export function QwixxClassicAiGame() {
     wasOver.current = state.phase === "ended"
   }, [state.phase, play])
 
+  useEffect(() => {
+    setHint(null)
+  }, [state.phase, state.roll?.ts])
+
   // AI automation: roll, white sum, color move.
   useEffect(() => {
     if (state.phase === "ended") return
@@ -124,8 +151,9 @@ export function QwixxClassicAiGame() {
         setAiThinking(true)
         await delay(400)
         if (cancelled) return
-        const next = runAiWhiteSum(s, difficultyRef.current)
+        const { state: next, decision } = runAiWhiteSum(s, difficultyRef.current)
         if (next.ai.rows !== s.ai.rows || next.turnPlaced !== s.turnPlaced) play(sfx.mark)
+        pushLog("white", decision)
         setState(next)
         setAiThinking(false)
         return
@@ -134,12 +162,13 @@ export function QwixxClassicAiGame() {
         setAiThinking(true)
         await delay(400)
         if (cancelled) return
-        const next = runAiColor(s, difficultyRef.current)
+        const { state: next, decision } = runAiColor(s, difficultyRef.current)
         if (next !== s) {
           if (!s.turnPlaced && next.turnPlaced) play(sfx.mark)
           else if (next.ai.penalties > s.ai.penalties) play(sfx.penalty)
           else play(sfx.mark)
         }
+        pushLog("color", decision)
         setState(next)
         setAiThinking(false)
       }
@@ -157,6 +186,7 @@ export function QwixxClassicAiGame() {
   }
 
   function handleHumanMark(color: ColorKey, index: number) {
+    if (isColorRemoved(state, color) && !state.human.rows[color].marks.includes(index)) return
     if (state.human.rows[color].marks.includes(index)) {
       const next = unmarkCell(state, "human", color, index)
       if (!next) return
@@ -198,10 +228,26 @@ export function QwixxClassicAiGame() {
     })
   }
 
+  function handleHint() {
+    const kind = state.phase === "whiteHuman" ? "white" : state.phase === "colorHuman" ? "color" : null
+    if (!kind) return
+    const decision = explainAiMove(state, kind, difficultyRef.current, "human")
+    logId.current += 1
+    setHint({
+      id: logId.current,
+      at: new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      phase: kind,
+      who: "Podpowiedź",
+      decision,
+    })
+  }
+
   function newGame() {
     setState(createClassicVsAi(state.human.name, state.ai.name))
     setDismissed(false)
     setSettingsOpen(false)
+    setAiLog([])
+    setHint(null)
     wasOver.current = false
   }
 
@@ -221,7 +267,7 @@ export function QwixxClassicAiGame() {
 
   return (
     <main className="min-h-[100dvh] bg-background text-foreground">
-      <div className="mx-auto max-w-4xl px-3 py-5 sm:px-5 sm:py-8">
+      <div className="mx-auto max-w-6xl px-3 py-5 sm:px-5 sm:py-8">
         <header className="mb-4 flex items-end justify-between gap-2">
           <div>
             <h1 className="text-2xl font-black sm:text-4xl">Classic vs AI</h1>
@@ -234,39 +280,67 @@ export function QwixxClassicAiGame() {
           <VersionNav active="classic-ai" />
         </header>
 
-        <PlayerBar state={state} />
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start lg:gap-4">
+          <div>
+            <PlayerBar state={state} />
 
-        {!gameOver && (
-          <ClassicAiTurnPanel
-            state={state}
-            aiThinking={aiThinking}
-            onRoll={handleHumanRoll}
-            onRollStart={() => play(sfx.roll)}
-            onSkipWhite={handleSkipWhite}
-            onEndTurn={handleEndTurn}
-          />
-        )}
+            {!gameOver && (
+              <ClassicAiTurnPanel
+                state={state}
+                aiThinking={aiThinking}
+                onRoll={handleHumanRoll}
+                onRollStart={() => play(sfx.roll)}
+                onSkipWhite={handleSkipWhite}
+                onEndTurn={handleEndTurn}
+              />
+            )}
 
-        <section className="mb-6">
-          <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Your sheet</h2>
-          <Board player={state.human} disabled={!humanCanMark} onMark={handleHumanMark} />
-        </section>
+            <section className="mb-6">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Your sheet</h2>
+                <button
+                  type="button"
+                  disabled={!humanCanMark}
+                  onClick={handleHint}
+                  className="rounded-full border border-border px-3 py-1 text-xs font-bold disabled:opacity-40 lg:hidden"
+                >
+                  Podpowiedz co zrobi AI
+                </button>
+              </div>
+              <Board
+                player={state.human}
+                state={state}
+                disabled={!humanCanMark}
+                onMark={handleHumanMark}
+              />
+            </section>
 
-        <section>
-          <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">AI sheet</h2>
-          <Board player={state.ai} disabled onMark={() => {}} />
-        </section>
+            <section>
+              <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">AI sheet</h2>
+              <Board player={state.ai} state={state} disabled onMark={() => {}} />
+            </section>
 
-        <div className="mt-4 flex gap-2">
-          <ToolbarButton label="Settings" onClick={() => setSettingsOpen(true)}>
-            <Settings className="h-5 w-5" />
-          </ToolbarButton>
-          <ToolbarButton label="New game" onClick={newGame}>
-            <RotateCcw className="h-5 w-5" />
-          </ToolbarButton>
-          <ToolbarButton label="Mute" onClick={() => setMuted((m) => !m)}>
-            {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-          </ToolbarButton>
+            <div className="mt-4 flex gap-2">
+              <ToolbarButton label="Settings" onClick={() => setSettingsOpen(true)}>
+                <Settings className="h-5 w-5" />
+              </ToolbarButton>
+              <ToolbarButton label="New game" onClick={newGame}>
+                <RotateCcw className="h-5 w-5" />
+              </ToolbarButton>
+              <ToolbarButton label="Mute" onClick={() => setMuted((m) => !m)}>
+                {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+              </ToolbarButton>
+            </div>
+          </div>
+
+          <div className="mt-6 lg:sticky lg:top-4 lg:mt-0 lg:h-[calc(100dvh-2rem)]">
+            <ClassicAiDebugPanel
+              log={aiLog}
+              hint={hint}
+              onHint={handleHint}
+              hintEnabled={humanCanMark}
+            />
+          </div>
         </div>
       </div>
 
@@ -325,25 +399,37 @@ function PlayerBar({ state }: { state: ClassicGameState }) {
 
 function Board({
   player,
+  state,
   disabled,
   onMark,
 }: {
   player: ClassicGameState["human"]
+  state: ClassicGameState
   disabled: boolean
   onMark: (color: ColorKey, index: number) => void
 }) {
   return (
     <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">
       <div className="min-w-[560px] space-y-2 sm:min-w-0 sm:space-y-2.5">
-        {ROWS.map((config) => (
-          <ScoreRow
-            key={config.key}
-            config={config}
-            row={player.rows[config.key]}
-            disabled={disabled}
-            onMark={(index) => onMark(config.key, index)}
-          />
-        ))}
+        {ROWS.map((config) => {
+          const removed = isColorRemoved(state, config.key)
+          const mineLocked = player.rows[config.key].locked
+          return (
+            <div key={config.key} className="relative">
+              <ScoreRow
+                config={config}
+                row={player.rows[config.key]}
+                disabled={disabled || (removed && !mineLocked)}
+                onMark={(index) => onMark(config.key, index)}
+              />
+              {removed && !mineLocked && (
+                <p className="mt-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Kość {config.label.toLowerCase()} zdjęta — rząd zamknięty przez przeciwnika
+                </p>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

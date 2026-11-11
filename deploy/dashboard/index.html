@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qwixx — trening</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0c0e12;
+    --card: #151922;
+    --line: #2a3140;
+    --text: #f3efe6;
+    --muted: #8b93a7;
+    --good: #7dcea0;
+    --bad: #e07a7a;
+    --amber: #e2b33b;
+    --red: #e23d3d;
+    --yellow: #e2b33b;
+    --green: #2f9e62;
+    --blue: #3b6fe2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, rgba(226, 179, 59, 0.08), transparent 50%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.45 ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+  }
+  .stripe { display: flex; height: 6px; }
+  .stripe span { flex: 1; }
+  .stripe .r { background: var(--red); }
+  .stripe .y { background: var(--yellow); }
+  .stripe .g { background: var(--green); }
+  .stripe .b { background: var(--blue); }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
+  h1 small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); background: var(--card);
+    border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 650;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--good); box-shadow: 0 0 0 4px rgba(125, 206, 160, 0.15); animation: pulse 1.6s ease-out infinite; }
+  .dot.wait { background: var(--amber); }
+  .dot.off { background: var(--bad); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px rgba(125, 206, 160, 0); } }
+  .hero { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+  .k { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .hero .v {
+    margin-top: 6px;
+    font-family: "Iowan Old Style", Palatino, Georgia, serif;
+    font-size: 56px; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+  }
+  .v.good { color: var(--good); }
+  .v.bad { color: var(--bad); }
+  .subv { margin-top: 8px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+  .metrics .v { margin-top: 6px; font-size: 26px; font-weight: 720; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+  .chart-wrap { margin-top: 12px; }
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  svg.chart { width: 100%; height: 240px; display: block; margin-top: 8px; }
+  svg.deltas { width: 100%; height: 120px; display: block; margin-top: 10px; }
+  .cols { display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 12px; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 6px; }
+  td { padding: 8px 6px; border-top: 1px solid var(--line); }
+  .tag { display: inline-block; min-width: 52px; text-align: center; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+  .tag.keep { background: rgba(125, 206, 160, 0.15); color: var(--good); }
+  .tag.stay { background: #222733; color: var(--muted); }
+  .weights { display: grid; gap: 7px; max-height: 420px; overflow: auto; }
+  .wrow { display: grid; grid-template-columns: 1fr auto; gap: 10px; font-size: 13px; }
+  .wrow b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .controls { display: flex; gap: 8px; margin-top: 14px; }
+  [hidden] { display: none !important; }
+  button {
+    border: 0; border-radius: 999px; padding: 9px 16px; font-weight: 750; cursor: pointer;
+    background: var(--text); color: #111;
+  }
+  button.stop { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .empty { color: var(--muted); padding: 28px 0; }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 12px;
+    align-items: center;
+    margin-top: 12px;
+  }
+  .compare-mid {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .compare-mid .v { font-size: 28px; letter-spacing: -0.03em; margin-top: 4px; }
+  .compare-side { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .compare-side .gen { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .compare-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .compare-row b { font-weight: 700; }
+  footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 1000px) {
+    .hero { grid-template-columns: 1fr 1fr 1fr; }
+  }
+  @media (max-width: 800px) {
+    .hero, .metrics { grid-template-columns: 1fr 1fr; }
+    .cols { grid-template-columns: 1fr; }
+    .hero .v { font-size: 42px; }
+    header { align-items: flex-start; flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="stripe" aria-hidden="true"><span class="r"></span><span class="y"></span><span class="g"></span><span class="b"></span></div>
+<main>
+  <header>
+    <h1>Qwixx <small>trening wag heurystyki</small></h1>
+    <div class="pill"><span class="dot" id="dot"></span><span id="state">Łączenie</span></div>
+  </header>
+  <section class="hero">
+    <article class="card">
+      <div class="k">Przewaga vs taker</div>
+      <div class="v" id="margin">—</div>
+      <div class="subv" id="delta">czekam na dane</div>
+    </article>
+    <article class="card">
+      <div class="k">Przyrost</div>
+      <div class="v" id="step" style="font-size:34px">—</div>
+      <div class="subv" id="stepMeta">vs poprzednie pokolenie</div>
+    </article>
+    <article class="card"><div class="k">Najlepszy</div><div class="v" id="best" style="font-size:34px">—</div><div class="subv" id="kept">—</div></article>
+    <article class="card"><div class="k">Pokolenie</div><div class="v" id="gen" style="font-size:34px">—</div><div class="subv" id="stall">—</div></article>
+    <article class="card"><div class="k">Tempo</div><div class="v" id="rate" style="font-size:34px">—</div><div class="subv" id="games">—</div></article>
+  </section>
+  <section class="card chart-wrap">
+    <div class="chart-head">
+      <div class="k">Historia przewagi</div>
+      <div class="subv" id="chartMeta"></div>
+    </div>
+    <div id="chart"></div>
+    <div class="chart-head" style="margin-top:14px">
+      <div class="k">Przyrost pokolenie → pokolenie</div>
+      <div class="subv" id="deltaMeta"></div>
+    </div>
+    <div id="deltaChart"></div>
+  </section>
+  <section class="card" style="margin-top:12px">
+    <div class="k">Porównanie ostatnich pokoleń</div>
+    <div class="subv" id="compareMeta">Poprzednie vs bieżące — ta sama metryka co w tabeli</div>
+    <div class="compare" id="comparePair">
+      <div class="empty">Potrzeba co najmniej dwóch pokoleń.</div>
+    </div>
+  </section>
+  <section class="metrics">
+    <article class="card"><div class="k">Sigma</div><div class="v" id="sigma">—</div></article>
+    <article class="card"><div class="k">Bez poprawy</div><div class="v" id="stallN">—</div></article>
+    <article class="card"><div class="k">Zachowane</div><div class="v" id="keptN">—</div></article>
+    <article class="card"><div class="k">Gier na pokolenie</div><div class="v" id="gamesN">—</div></article>
+  </section>
+  <section class="cols">
+    <article class="card">
+      <div class="k">Ostatnie pokolenia</div>
+      <table>
+        <thead><tr><th>Gen</th><th>vs taker</th><th>Δ przewagi</th><th>Pkt W</th><th>Δ W</th><th>Pkt L</th><th>Δ L</th><th></th><th>Czas</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </article>
+    <article class="card">
+      <div class="k">Wagi championa</div>
+      <div class="weights" id="weights"></div>
+      <div class="controls" id="controls" hidden>
+        <button type="button" id="start">Włącz</button>
+        <button type="button" class="stop" id="stop">Wyłącz</button>
+      </div>
+      <div class="err" id="err"></div>
+    </article>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<script>
+const LABELS = {
+  lockProgress: "Zamykanie rzędu",
+  missExponent: "Kara za pudła",
+  edgePenalty: "Dziury w rzędzie",
+  edgeRewardAfterFive: "Nagroda po piątym",
+  blockOpponent: "Blokada przeciwnika",
+  focusRowBonus: "Skupienie na rzędach",
+  marginalRowPenalty: "Kara za poboczne",
+  middleNumberBonus: "Środek 6–8",
+  lockNowBonus: "Weź kłódkę",
+  investedRowUrgency: "Rząd zagrożony",
+  forcedMissWeight: "Ryzyko pudła",
+  deathDoorMissMultiplier: "Trzecie pudło",
+  oppWeight: "Waga wyniku przeciwnika",
+  passWhite: "Próg białych",
+  passColor: "Próg koloru",
+  continuationBonus: "Kontynuacja",
+  startRowBonus: "Start rzędu",
+  strandedPenalty: "Rząd bez zamknięcia",
+  almostLock: "Prawie kłódka",
+  endWhileBehind: "Nie zamykaj w plecy"
+}
+const STATE = {
+  running: ["Działa", "on"],
+  evaluating: ["Liczy pokolenie", "on"],
+  stopped: ["Zatrzymany", "off"],
+  done: ["Zakończony", "off"],
+  przerwany: ["Przerwany", "off"],
+  brak: ["Brak danych", "wait"],
+  idle: ["Bezczynny", "wait"]
+}
+const nf = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 0 })
+const el = (id) => document.getElementById(id)
+
+function num(n) { return typeof n === "number" && Number.isFinite(n) }
+function signed(n) { return (n > 0 ? "+" : "") + n.toFixed(2) }
+function cls(n) { return n > 0.05 ? "good" : n < -0.05 ? "bad" : "" }
+function when(iso) {
+  if (!iso) return "nigdy"
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000)
+  if (s < 5) return "przed chwilą"
+  if (s < 60) return `przed ${Math.floor(s)} s`
+  if (s < 3600) return `przed ${Math.floor(s / 60)} min`
+  return iso.replace("T", " ").slice(0, 19)
+}
+
+function withDeltas(history) {
+  const pts = (history || []).filter((e) => num(e.vsTaker))
+  return pts.map((e, i) => {
+    const prev = i > 0 ? pts[i - 1] : null
+    const delta =
+      num(e.deltaVsPrev) ? e.deltaVsPrev : i === 0 ? null : e.vsTaker - pts[i - 1].vsTaker
+    const deltaW =
+      prev && num(e.avgScoreWins) && num(prev.avgScoreWins)
+        ? e.avgScoreWins - prev.avgScoreWins
+        : null
+    const deltaL =
+      prev && num(e.avgScoreLosses) && num(prev.avgScoreLosses)
+        ? e.avgScoreLosses - prev.avgScoreLosses
+        : null
+    return { ...e, delta, deltaW, deltaL }
+  })
+}
+
+function deltaCell(v) {
+  if (!num(v)) return "—"
+  return `<span class="${cls(v)}">${signed(v)}</span>`
+}
+
+function compareSide(e, title) {
+  if (!e) return `<div class="compare-side"><div class="gen">${title}</div><div class="empty">—</div></div>`
+  return `<div class="compare-side">
+    <div class="gen">${title} · gen ${e.gen}${e.event === "keep" ? " · zapis" : ""}</div>
+    <div class="compare-row"><span>Przewaga vs taker</span><b class="${cls(e.vsTaker)}">${signed(e.vsTaker)}</b></div>
+    <div class="compare-row"><span>Śr. pkt przy wygranej</span><b>${num(e.avgScoreWins) ? e.avgScoreWins.toFixed(1) : "—"}</b></div>
+    <div class="compare-row"><span>Śr. pkt przy przegranej</span><b>${num(e.avgScoreLosses) ? e.avgScoreLosses.toFixed(1) : "—"}</b></div>
+  </div>`
+}
+
+function renderComparePair(hist) {
+  const box = el("comparePair")
+  const meta = el("compareMeta")
+  if (hist.length < 2) {
+    box.innerHTML = `<div class="empty">Potrzeba co najmniej dwóch pokoleń w historii.</div>`
+    meta.textContent = "Poprzednie vs bieżące — ta sama metryka co w tabeli"
+    return
+  }
+  const prev = hist[hist.length - 2]
+  const cur = hist[hist.length - 1]
+  const mid = `
+    <div class="compare-mid">Przyrost<br>
+      <div class="v ${cls(cur.delta)}">${num(cur.delta) ? signed(cur.delta) : "—"}</div>
+      <div style="margin-top:8px;font-size:11px;font-weight:600;text-transform:none;letter-spacing:0">
+        Pkt W ${deltaCell(cur.deltaW)}<br>Pkt L ${deltaCell(cur.deltaL)}
+      </div>
+    </div>`
+  box.innerHTML = compareSide(prev, "Poprzednie") + mid + compareSide(cur, "Bieżące")
+  const sum = hist.slice(1).reduce((acc, e) => acc + (num(e.delta) ? e.delta : 0), 0)
+  meta.textContent = `Ostatnie przejście gen ${prev.gen} → ${cur.gen} · suma przyrostów w historii ${signed(sum)} (${hist.length - 1} kroków)`
+}
+
+function chart(history) {
+  const pts = withDeltas(history)
+  if (pts.length < 2) {
+    el("chart").innerHTML = `<div class="empty">Wykres pojawi się po dwóch pokoleniach.</div>`
+    el("chartMeta").textContent = ""
+    el("deltaChart").innerHTML = `<div class="empty">Przyrosty pojawią się po dwóch pokoleniach.</div>`
+    el("deltaMeta").textContent = ""
+    renderComparePair(pts)
+    return
+  }
+  const w = 800, h = 220, l = 44, r = 12, t = 16, b = 28
+  const vals = pts.map((p) => p.vsTaker)
+  const min = Math.min(...vals, 0)
+  const max = Math.max(...vals, 0)
+  const span = max - min || 1
+  const x = (i) => l + (i / (pts.length - 1)) * (w - l - r)
+  const y = (v) => t + (1 - (v - min) / span) * (h - t - b)
+  const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.vsTaker).toFixed(1)}`).join(" ")
+  const area = `${x(0).toFixed(1)},${y(min).toFixed(1)} ${line} ${x(pts.length - 1).toFixed(1)},${y(min).toFixed(1)}`
+  const keeps = pts.map((p, i) => p.event === "keep" ? `<circle cx="${x(i).toFixed(1)}" cy="${y(p.vsTaker).toFixed(1)}" r="3.5" fill="#7dcea0"/>` : "").join("")
+  const y0 = y(0)
+  el("chart").innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Wykres przewagi">
+    <line x1="${l}" y1="${y0.toFixed(1)}" x2="${w - r}" y2="${y0.toFixed(1)}" stroke="#2a3140"/>
+    <text x="0" y="${y(max) + 4}" fill="#8b93a7" font-size="11">${max.toFixed(1)}</text>
+    <text x="0" y="${y(min) + 4}" fill="#8b93a7" font-size="11">${min.toFixed(1)}</text>
+    <polygon points="${area}" fill="rgba(226,179,59,0.14)"/>
+    <polyline points="${line}" fill="none" stroke="#e2b33b" stroke-width="2.4" stroke-linejoin="round"/>
+    ${keeps}
+  </svg>`
+  const d = vals[vals.length - 1] - vals[0]
+  const step = vals[vals.length - 1] - vals[vals.length - 2]
+  el("chartMeta").textContent = `${pts.length} punktów · od początku ${signed(d)} · ostatni krok ${signed(step)} · kropki = zapis`
+
+  const deltas = pts.slice(1).map((p) => p.delta)
+  const dMin = Math.min(...deltas, 0)
+  const dMax = Math.max(...deltas, 0)
+  const dSpan = dMax - dMin || 1
+  const dh = 110, dt = 10, db = 18
+  const dy = (v) => dt + (1 - (v - dMin) / dSpan) * (dh - dt - db)
+  const zero = dy(0)
+  const barW = Math.max(2, ((w - l - r) / Math.max(deltas.length, 1)) * 0.72)
+  const labels = pts.slice(1)
+  const bars = deltas.map((v, i) => {
+    const cx = x(i + 1)
+    const y1 = dy(v)
+    const top = Math.min(y1, zero)
+    const height = Math.max(1.5, Math.abs(y1 - zero))
+    const fill = v > 0.05 ? "#7dcea0" : v < -0.05 ? "#e07a7a" : "#5a6478"
+    const g = labels[i]?.gen ?? i + 2
+    const txt =
+      deltas.length <= 24 || i % Math.ceil(deltas.length / 24) === 0
+        ? `<text x="${cx.toFixed(1)}" y="${dh - 4}" fill="#8b93a7" font-size="9" text-anchor="middle">${g}</text>`
+        : ""
+    return `<rect x="${(cx - barW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" fill="${fill}" rx="1.5"/>${txt}`
+  }).join("")
+  el("deltaChart").innerHTML = `<svg class="deltas" viewBox="0 0 ${w} ${dh}" role="img" aria-label="Przyrost między pokoleniami">
+    <line x1="${l}" y1="${zero.toFixed(1)}" x2="${w - r}" y2="${zero.toFixed(1)}" stroke="#2a3140"/>
+    <text x="0" y="${dy(dMax) + 4}" fill="#8b93a7" font-size="11">${dMax.toFixed(1)}</text>
+    <text x="0" y="${dy(dMin) + 4}" fill="#8b93a7" font-size="11">${dMin.toFixed(1)}</text>
+    ${bars}
+  </svg>`
+  const up = deltas.filter((v) => v > 0.05).length
+  const down = deltas.filter((v) => v < -0.05).length
+  const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length
+  el("deltaMeta").textContent = `średni krok ${signed(avg)} · ↑${up} ↓${down} · zieleń = wzrost vs poprzednie · etykiety = nr pokolenia`
+  renderComparePair(pts)
+}
+
+function render(s) {
+  const [label, kind] = STATE[s.state] || [s.state || "—", "wait"]
+  el("state").textContent = label
+  el("dot").className = "dot " + kind
+  const m = el("margin")
+  m.textContent = num(s.vsTaker) ? signed(s.vsTaker) : "—"
+  m.className = "v " + (num(s.vsTaker) ? cls(s.vsTaker) : "")
+  const hist = withDeltas(s.history || [])
+  el("delta").textContent = hist.length > 1 ? `od pierwszego punktu ${signed(hist[hist.length - 1].vsTaker - hist[0].vsTaker)}` : "jeszcze bez historii"
+  const last = hist[hist.length - 1]
+  const stepEl = el("step")
+  if (last && last.delta != null && num(last.delta)) {
+    stepEl.textContent = signed(last.delta)
+    stepEl.className = "v " + cls(last.delta)
+    const keeps = hist.filter((e) => e.event === "keep")
+    const keepDelta =
+      keeps.length >= 2 ? keeps[keeps.length - 1].vsTaker - keeps[keeps.length - 2].vsTaker : null
+    el("stepMeta").textContent = num(keepDelta)
+      ? `vs poprzednie · ostatni zapis ${signed(keepDelta)}`
+      : "vs poprzednie pokolenie"
+  } else {
+    stepEl.textContent = "—"
+    stepEl.className = "v"
+    el("stepMeta").textContent = "vs poprzednie pokolenie"
+  }
+  el("best").textContent = num(s.bestVsTaker) ? signed(s.bestVsTaker) : "—"
+  el("best").className = "v " + (num(s.bestVsTaker) ? cls(s.bestVsTaker) : "")
+  el("kept").textContent = `${s.kept ?? 0} zapisanych zestawów`
+  el("gen").textContent = s.generation ?? "—"
+  el("stall").textContent = s.pidAlive ? "proces żyje" : "proces nie działa"
+  el("rate").textContent = num(s.gensPerHour) ? nf.format(Math.round(s.gensPerHour)) : "—"
+  el("games").textContent = "pokoleń na godzinę"
+  el("sigma").textContent = num(s.sigma) ? s.sigma.toFixed(2) : "—"
+  el("stallN").textContent = s.stall ?? "—"
+  el("keptN").textContent = s.kept ?? "—"
+  el("gamesN").textContent = s.games ?? "—"
+  chart(s.history)
+  if (hist.length < 2) renderComparePair(hist)
+  const rows = [...hist].reverse().slice(0, 18)
+  el("rows").innerHTML = rows.map((e) => `<tr>
+    <td>${e.gen}</td>
+    <td class="${num(e.vsTaker) ? cls(e.vsTaker) : ""}">${num(e.vsTaker) ? signed(e.vsTaker) : "—"}</td>
+    <td class="${num(e.delta) ? cls(e.delta) : ""}">${num(e.delta) ? signed(e.delta) : "—"}</td>
+    <td>${num(e.avgScoreWins) ? e.avgScoreWins.toFixed(1) : "—"}</td>
+    <td class="${num(e.deltaW) ? cls(e.deltaW) : ""}">${num(e.deltaW) ? signed(e.deltaW) : "—"}</td>
+    <td>${num(e.avgScoreLosses) ? e.avgScoreLosses.toFixed(1) : "—"}</td>
+    <td class="${num(e.deltaL) ? cls(e.deltaL) : ""}">${num(e.deltaL) ? signed(e.deltaL) : "—"}</td>
+    <td><span class="tag ${e.event === "keep" ? "keep" : "stay"}">${e.event === "keep" ? "zapis" : "zostaw"}</span></td>
+    <td>${(e.at || "").replace("T", " ").slice(11, 19)}</td>
+  </tr>`).join("") || `<tr><td colspan="9" class="empty">Brak pokoleń</td></tr>`
+  const champ = s.champion || {}
+  el("weights").innerHTML = Object.keys(champ).map((k) => `<div class="wrow"><span>${LABELS[k] || k}</span><b>${Number(champ[k]).toFixed(2)}</b></div>`).join("") || `<div class="empty">Brak wag</div>`
+  const errLine = s.lastError ? ` · błąd: ${String(s.lastError).split("\n")[0]}` : ""
+  el("foot").textContent = `Ostatnia aktualizacja ${when(s.updatedAt)} · odświeżanie co 2 s${errLine}`
+}
+
+async function tick() {
+  const s = await fetch("/api/status", { cache: "no-store" }).then((r) => r.json())
+  render(s)
+}
+
+async function control(path) {
+  el("err").textContent = ""
+  const res = await fetch(path, { method: "POST" })
+  if (!res.ok) {
+    el("err").textContent = (await res.text()) || "Nie udało się wysłać polecenia."
+    return
+  }
+  setTimeout(tick, 400)
+}
+
+document.getElementById("start").onclick = () => control("/api/start")
+document.getElementById("stop").onclick = () => control("/api/stop")
+
+const q = new URLSearchParams(location.search).get("token")
+if (q) {
+  fetch("/api/session?token=" + encodeURIComponent(q)).then((r) => {
+    if (r.ok) {
+      el("controls").hidden = false
+      history.replaceState(null, "", "/")
+    }
+  })
+} else if (document.cookie.includes("qwixx_ui=1")) {
+  el("controls").hidden = false
+}
+
+tick().catch(() => { el("state").textContent = "Brak połączenia"; el("dot").className = "dot off" })
+setInterval(() => tick().catch(() => {}), 2000)
+</script>
+</body>
+</html>

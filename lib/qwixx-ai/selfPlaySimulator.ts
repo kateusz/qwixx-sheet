@@ -3,7 +3,6 @@ import {
   afterColorAi,
   afterWhiteAi,
   applyMark,
-  applyPenalty,
   createClassicVsAi,
   endColorHuman,
   finishTurn,
@@ -106,14 +105,12 @@ function playOneGame(expectimaxAs: ClassicPlayerId, depth: number, weights: Heur
 
     if (state.phase === "colorHuman" && state.active === "human") {
       state = runColor(state, "human", expectimaxAs === "human", depth, weights)
-      if (!state.turnPlaced) state = applyPenalty(state, "human")
       state = endColorHuman(state)
       continue
     }
 
     if (state.phase === "colorAi" && state.active === "ai") {
       state = runColor(state, "ai", expectimaxAs === "ai", depth, weights)
-      if (!state.turnPlaced) state = applyPenalty(state, "ai")
       state = afterColorAi(state)
       continue
     }

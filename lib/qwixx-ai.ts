@@ -1,128 +1,117 @@
 import {
   type ClassicGameState,
   type ClassicMove,
+  type ClassicPlayerId,
   applyMark,
   afterColorAi,
   afterWhiteAi,
   getColorMoves,
   getWhiteSumMoves,
-  playerRef,
   randomRollValues,
   rollDice,
 } from "./qwixx-classic-multi"
-import { totalScore } from "./qwixx"
-import { classicToGameState, moveToClassic } from "./qwixx-ai/classicAdapter"
-import { pickBestMove } from "./qwixx-ai/expectimax"
-import { scoreMoveHardRules } from "./qwixx-ai/hardRules"
-import { DEFAULT_WEIGHTS } from "./qwixx-ai/heuristics"
-import type { Move } from "./qwixx-ai/gameState"
+import { explainPick, fastLookaheadPick, fastPick, type AiDecision } from "./qwixx-ai/fastPolicy"
+import { activeWeights } from "./qwixx-ai/heuristics"
 
 export type AiDifficulty = "easy" | "normal" | "hard"
+export type { AiDecision }
 
-const EXPECTIMAX_DEPTH: Record<AiDifficulty, number> = {
-  easy: 1,
-  normal: 2,
-  hard: 3,
-}
-
-function scoreDelta(state: ClassicGameState, player: "ai", move: ClassicMove): number {
-  const before = totalScore(playerRef(state, player))
-  const next = applyMark(state, player, move.color, move.index)
-  if (!next) return -Infinity
-  return totalScore(playerRef(next, player)) - before
-}
-
-function rankMove(state: ClassicGameState, player: "ai", move: ClassicMove): number {
-  let rank = scoreDelta(state, player, move)
-  const p = playerRef(state, player)
-  const len = p.rows[move.color].marks.length
-  if (len === 4) rank += 8
-  if (len >= 5) rank += 3
-
-  const gs = classicToGameState(state, "ai")
-  const aiMove: Move = { kind: "mark", color: move.color, index: move.index, number: move.number }
-  rank += scoreMoveHardRules(gs, aiMove, DEFAULT_WEIGHTS)
-  return rank
-}
-
-function pickBestGreedy(
-  state: ClassicGameState,
-  moves: ClassicMove[],
-  minScore: number,
-  difficulty: AiDifficulty,
-): ClassicMove | null {
-  if (moves.length === 0) return null
-  const ranked = moves
-    .map((m) => ({ m, rank: rankMove(state, "ai", m) }))
-    .sort((a, b) => b.rank - a.rank)
-
-  if (difficulty === "easy" && Math.random() < 0.35) {
-    return ranked[Math.floor(Math.random() * ranked.length)]!.m
+function easyPick(state: ClassicGameState, kind: "white" | "color"): ClassicMove | null {
+  const moves = kind === "white" ? getWhiteSumMoves(state, "ai") : getColorMoves(state, "ai")
+  if (Math.random() < 0.35) {
+    if (moves.length === 0 || Math.random() < 0.25) return null
+    return moves[Math.floor(Math.random() * moves.length)]!
   }
-
-  const best = ranked[0]!
-  if (best.rank < minScore) return null
-  return best.m
-}
-
-function pickExpectimax(
-  state: ClassicGameState,
-  phase: "white" | "color",
-  difficulty: AiDifficulty,
-): ClassicMove | null {
-  const gs = classicToGameState(state, "ai")
-  if (phase === "color") {
-    gs.phase = "colorSelf"
-    gs.selfWhiteUsed = true
-  }
-  const depth = EXPECTIMAX_DEPTH[difficulty]
-  const sample = difficulty === "hard" ? 120 : 60
-  const move = pickBestMove(gs, depth, phase === "color" || state.active === "ai", {
-    weights: DEFAULT_WEIGHTS,
-    chanceSampleSize: sample,
-  })
-  return moveToClassic(move)
+  return fastPick(state, "ai", kind, activeWeights())
 }
 
 export function aiPickWhiteSum(state: ClassicGameState, difficulty: AiDifficulty): ClassicMove | null {
-  if (difficulty === "hard" || difficulty === "normal") {
-    const move = pickExpectimax(state, "white", difficulty)
-    if (move) return move
-  }
-  return pickBestGreedy(state, getWhiteSumMoves(state, "ai"), difficulty === "easy" ? 1 : 3, difficulty)
+  if (difficulty === "easy") return easyPick(state, "white")
+  const w = activeWeights()
+  if (difficulty === "hard") return fastLookaheadPick(state, "ai", "white", w, 3)
+  return fastPick(state, "ai", "white", w)
 }
 
 export function aiPickColor(state: ClassicGameState, difficulty: AiDifficulty): ClassicMove | null {
-  if (difficulty === "hard" || difficulty === "normal") {
-    const move = pickExpectimax(state, "color", difficulty)
-    if (move) return move
+  if (difficulty === "easy") return easyPick(state, "color")
+  const w = activeWeights()
+  if (difficulty === "hard") return fastLookaheadPick(state, "ai", "color", w, 3)
+  return fastPick(state, "ai", "color", w)
+}
+
+/** Decision + reasons. Hard may override the 1-ply choice with lookahead. */
+export function explainAiMove(
+  state: ClassicGameState,
+  kind: "white" | "color",
+  difficulty: AiDifficulty,
+  player: ClassicPlayerId = "ai",
+): AiDecision {
+  const w = activeWeights()
+  const decision = explainPick(state, player, kind, w)
+  if (difficulty === "easy") {
+    return {
+      ...decision,
+      reasons: ["easy miesza z losowością; poniżej ocena normal", ...decision.reasons],
+    }
   }
-  return pickBestGreedy(state, getColorMoves(state, "ai"), difficulty === "easy" ? 0 : 1, difficulty)
+  if (difficulty === "hard") {
+    const hard = fastLookaheadPick(state, player, kind, w, 3)
+    const same = hard?.color === decision.choice?.color && hard?.index === decision.choice?.index
+    if (same) {
+      return { ...decision, reasons: ["hard: zgodne z lookaheadem", ...decision.reasons] }
+    }
+    return {
+      ...decision,
+      choice: hard,
+      reasons: [
+        hard ? `hard: lookahead wybrał ${hard.color} ${hard.number}` : "hard: lookahead woli pominąć",
+        ...decision.reasons,
+      ],
+    }
+  }
+  return decision
 }
 
-export function runAiWhiteSum(state: ClassicGameState, difficulty: AiDifficulty): ClassicGameState {
+export function runAiWhiteSum(
+  state: ClassicGameState,
+  difficulty: AiDifficulty,
+): { state: ClassicGameState; decision: AiDecision } {
+  let decision = explainAiMove(state, "white", difficulty, "ai")
   let next = state
-  const move = aiPickWhiteSum(next, difficulty)
-  if (move) next = applyMark(next, "ai", move.color, move.index) ?? next
-  return afterWhiteAi(next)
+  const picked = difficulty === "easy" ? easyPick(state, "white") : decision.choice
+  if (difficulty === "easy") {
+    decision = {
+      ...decision,
+      choice: picked,
+      reasons: picked
+        ? [`easy zagrało ${picked.color} ${picked.number}`, ...decision.reasons]
+        : ["easy pominęło białe", ...decision.reasons],
+    }
+  }
+  if (picked) next = applyMark(next, "ai", picked.color, picked.index) ?? next
+  return { state: afterWhiteAi(next), decision }
 }
 
-export function runAiColor(state: ClassicGameState, difficulty: AiDifficulty): ClassicGameState {
+export function runAiColor(
+  state: ClassicGameState,
+  difficulty: AiDifficulty,
+): { state: ClassicGameState; decision: AiDecision } {
+  let decision = explainAiMove(state, "color", difficulty, "ai")
   let next = state
-  const move = aiPickColor(next, difficulty)
-  if (move) next = applyMark(next, "ai", move.color, move.index) ?? next
-  return afterColorAi(next)
+  const picked = difficulty === "easy" ? easyPick(state, "color") : decision.choice
+  if (difficulty === "easy") {
+    decision = {
+      ...decision,
+      choice: picked,
+      reasons: picked
+        ? [`easy zagrało ${picked.color} ${picked.number}`, ...decision.reasons]
+        : ["easy pominęło kolor / wzięło karę", ...decision.reasons],
+    }
+  }
+  if (picked) next = applyMark(next, "ai", picked.color, picked.index) ?? next
+  return { state: afterColorAi(next), decision }
 }
 
 export function runAiRoll(state: ClassicGameState): ClassicGameState {
   return rollDice(state, randomRollValues())
-}
-
-// ponytail: minimal self-check
-if (typeof process !== "undefined" && process.argv[1]?.endsWith("qwixx-ai.ts")) {
-  const { createClassicVsAi, rollDice: roll } = require("./qwixx-classic-multi") as typeof import("./qwixx-classic-multi")
-  let s = roll(createClassicVsAi(), [2, 3, 1, 4, 5, 6])
-  s = { ...s, phase: "whiteAi" }
-  const m = aiPickWhiteSum(s, "hard")
-  console.assert(m === null || m.color !== undefined, "hard AI returns move or null")
 }
