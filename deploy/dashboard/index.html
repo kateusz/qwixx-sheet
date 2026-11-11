@@ -128,7 +128,7 @@
     <article class="card">
       <div class="k">Ostatnie pokolenia</div>
       <table>
-        <thead><tr><th>Gen</th><th>vs taker</th><th>Sigma</th><th></th><th>Czas</th></tr></thead>
+        <thead><tr><th>Gen</th><th>vs taker</th><th>Pkt W</th><th>Pkt L</th><th></th><th>Czas</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </article>
@@ -246,10 +246,11 @@ function render(s) {
   el("rows").innerHTML = rows.map((e) => `<tr>
     <td>${e.gen}</td>
     <td class="${num(e.vsTaker) ? cls(e.vsTaker) : ""}">${num(e.vsTaker) ? signed(e.vsTaker) : "—"}</td>
-    <td>${num(e.sigma) ? e.sigma.toFixed(2) : "—"}</td>
+    <td>${num(e.avgScoreWins) ? e.avgScoreWins.toFixed(1) : "—"}</td>
+    <td>${num(e.avgScoreLosses) ? e.avgScoreLosses.toFixed(1) : "—"}</td>
     <td><span class="tag ${e.event === "keep" ? "keep" : "stay"}">${e.event === "keep" ? "zapis" : "zostaw"}</span></td>
     <td>${(e.at || "").replace("T", " ").slice(11, 19)}</td>
-  </tr>`).join("") || `<tr><td colspan="5" class="empty">Brak pokoleń</td></tr>`
+  </tr>`).join("") || `<tr><td colspan="6" class="empty">Brak pokoleń</td></tr>`
   const champ = s.champion || {}
   el("weights").innerHTML = Object.keys(champ).map((k) => `<div class="wrow"><span>${LABELS[k] || k}</span><b>${Number(champ[k]).toFixed(2)}</b></div>`).join("") || `<div class="empty">Brak wag</div>`
   const errLine = s.lastError ? ` · błąd: ${String(s.lastError).split("\n")[0]}` : ""

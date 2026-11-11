@@ -172,18 +172,65 @@ export function playGame(human: SeatPolicy, ai: SeatPolicy, rng: () => number): 
   return { human: totalScore(state.human), ai: totalScore(state.ai) }
 }
 
-/** Mean (my score − opp score). Seats alternate so first-player bias cancels. */
-export function marginBetween(mine: SeatPolicy, opp: SeatPolicy, seeds: number[]): number {
-  let sum = 0
+export interface MatchupStats {
+  /** Mean (my score − opp score). Seats alternate so first-player bias cancels. */
+  margin: number
+  wins: number
+  losses: number
+  ties: number
+  /** Mean of my sheet score in games I won. Null if no wins. */
+  avgScoreWins: number | null
+  /** Mean of my sheet score in games I lost. Null if no losses. */
+  avgScoreLosses: number | null
+  avgMyScore: number
+  avgOppScore: number
+}
+
+/** Full matchup breakdown. Seats alternate so first-player bias cancels. */
+export function matchupStats(mine: SeatPolicy, opp: SeatPolicy, seeds: number[]): MatchupStats {
+  let marginSum = 0
+  let mySum = 0
+  let oppSum = 0
+  let wins = 0
+  let losses = 0
+  let ties = 0
+  let winScoreSum = 0
+  let lossScoreSum = 0
   for (let i = 0; i < seeds.length; i++) {
     const rng = makeRng(seeds[i]!)
     const swap = i % 2 === 1
     const res = swap ? playGame(opp, mine, rng) : playGame(mine, opp, rng)
     const my = swap ? res.ai : res.human
     const their = swap ? res.human : res.ai
-    sum += my - their
+    marginSum += my - their
+    mySum += my
+    oppSum += their
+    if (my > their) {
+      wins += 1
+      winScoreSum += my
+    } else if (my < their) {
+      losses += 1
+      lossScoreSum += my
+    } else {
+      ties += 1
+    }
   }
-  return seeds.length ? sum / seeds.length : 0
+  const n = seeds.length
+  return {
+    margin: n ? marginSum / n : 0,
+    wins,
+    losses,
+    ties,
+    avgScoreWins: wins ? winScoreSum / wins : null,
+    avgScoreLosses: losses ? lossScoreSum / losses : null,
+    avgMyScore: n ? mySum / n : 0,
+    avgOppScore: n ? oppSum / n : 0,
+  }
+}
+
+/** Mean (my score − opp score). Seats alternate so first-player bias cancels. */
+export function marginBetween(mine: SeatPolicy, opp: SeatPolicy, seeds: number[]): number {
+  return matchupStats(mine, opp, seeds).margin
 }
 
 export function generationSeeds(generation: number, games: number, salt: number): number[] {

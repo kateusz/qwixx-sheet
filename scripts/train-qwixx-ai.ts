@@ -15,7 +15,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { generationSeeds, marginBetween, mutateWeights, makeRng, playGame } from "../lib/qwixx-ai/evolve"
+import { generationSeeds, marginBetween, matchupStats, mutateWeights, makeRng, playGame } from "../lib/qwixx-ai/evolve"
 import { activeWeights, DEFAULT_WEIGHTS, type HeuristicWeights } from "../lib/qwixx-ai/heuristics"
 
 interface Checkpoint {
@@ -130,7 +130,18 @@ async function main() {
   }
 
   const startedAt = new Date(startedMs).toISOString()
-  let history: { gen: number; vsTaker: number | null; sigma: number; event: string; at: string }[] = []
+  let history: {
+    gen: number
+    vsTaker: number | null
+    sigma: number
+    event: string
+    at: string
+    avgScoreWins?: number | null
+    avgScoreLosses?: number | null
+    wins?: number
+    losses?: number
+    ties?: number
+  }[] = []
   let bestVs = Number.NEGATIVE_INFINITY
   let kept = 0
   let lastError: string | null = null
@@ -230,7 +241,8 @@ async function main() {
     try {
       const seeds = generationSeeds(gen, games, salt)
       const rng = makeRng((gen * 17 + salt) >>> 0)
-      const champMargin = marginBetween(cp.champion, "taker", seeds)
+      const champSheet = matchupStats(cp.champion, "taker", seeds)
+      const champMargin = champSheet.margin
 
       let best = cp.champion
       let bestMargin = champMargin
@@ -270,12 +282,19 @@ async function main() {
       const event = improved ? "keep" : "stay"
       if (improved) kept += 1
       if (Number.isFinite(cp.vsTaker) && cp.vsTaker > bestVs) bestVs = cp.vsTaker
+      // Score by outcome on this generation's seeds (policy that owns vsTaker).
+      const sheet = improved ? matchupStats(best, "taker", seeds) : champSheet
       history.push({
         gen,
         vsTaker: round(cp.vsTaker),
         sigma: round(cp.sigma),
         event,
         at: new Date().toISOString(),
+        avgScoreWins: round(sheet.avgScoreWins ?? Number.NaN),
+        avgScoreLosses: round(sheet.avgScoreLosses ?? Number.NaN),
+        wins: sheet.wins,
+        losses: sheet.losses,
+        ties: sheet.ties,
       })
       if (history.length > 240) history = history.slice(-240)
       strikes = 0
@@ -283,8 +302,10 @@ async function main() {
 
       if (improved || gen % 25 === 0) {
         const elapsedH = (Date.now() - startedMs) / 3_600_000
+        const winPts = sheet.avgScoreWins == null ? "—" : sheet.avgScoreWins.toFixed(1)
+        const lossPts = sheet.avgScoreLosses == null ? "—" : sheet.avgScoreLosses.toFixed(1)
         console.log(
-          `gen ${gen}  vsTaker ${cp.vsTaker.toFixed(2)}  sigma ${cp.sigma.toFixed(3)}  ${improved ? "KEEP" : "stay"}  ${elapsedH.toFixed(2)}h`,
+          `gen ${gen}  vsTaker ${cp.vsTaker.toFixed(2)}  sigma ${cp.sigma.toFixed(3)}  ${improved ? "KEEP" : "stay"}  W${sheet.wins}/L${sheet.losses} pts ${winPts}/${lossPts}  ${elapsedH.toFixed(2)}h`,
         )
       }
     } catch (err) {
